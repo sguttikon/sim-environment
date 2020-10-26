@@ -1,0 +1,3 @@
+[submodule "envs/iGibson"]
+	path = envs/iGibson
+	url = https://github.com/StanfordVL/iGibson
