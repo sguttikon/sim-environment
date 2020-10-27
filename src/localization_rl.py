@@ -5,6 +5,7 @@ from gibson2.envs.locomotor_env import NavigateEnv, NavigateRandomEnv
 from transforms3d.euler import quat2euler
 from DPF.dpf import DMCL
 import numpy as np
+import torch
 import utils
 
 curr_dir_path = os.path.dirname(os.path.abspath(__file__))
@@ -22,23 +23,28 @@ def train_network(env):
     """
     """
     num_epochs = 1
-    epoch_len = 100
+    epoch_len = 1
     epoch = 0
 
     turtlebot = env.robots[0]
     while epoch < num_epochs:
         epoch += 1
-
         obs = env.reset()
         init_pose = get_pose(turtlebot)
-        particles = dmcl.initialize_particles(init_pose)
+        particles, particle_probs = dmcl.initialize_particles(init_pose)
 
-        # motion update
-        action = env.action_space.sample()
-        particles = dmcl.motion_update(action, particles)
+        for step in range(epoch_len):
+            # motion update
+            action = env.action_space.sample()
+            obs, reward, done, info = nav_env.step(action)
+            particles = dmcl.motion_update(action, particles)
 
-        # measurement update
-        probs = dmcl.measurement_update(obs, particles)
+            # measurement update
+            particle_probs *= dmcl.measurement_update(obs, particles)
+            particle_probs /= torch.sum(particle_probs, axis=0) # normalize probabilities
+
+            # resample
+            particles = dmcl.resample_particles(particles, particle_probs)
 
 if __name__ == '__main__':
     # configuration file contains: robot, scene, etc. details

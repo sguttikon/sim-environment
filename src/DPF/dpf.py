@@ -88,10 +88,10 @@ class DMCL():
                 nn.Linear(128, 128),
                 nn.ReLU(),
                 nn.Linear(128, 1),
-                nn.Sigmoid()
-        )
+                nn.Softmax(dim=0)
+        ).to(device)
 
-    def initialize_particles(self, init_pose: np.ndarray):
+    def initialize_particles(self, init_pose: np.ndarray) -> (torch.Tensor, torch.Tensor):
         """
         """
         self._state_range = np.array([
@@ -108,9 +108,9 @@ class DMCL():
                     for d in range(self._state_dim)
         ], axis = -1).to(device)
 
-        self._init_particles_probs = torch.ones(self._num_particles).to(device) / self._num_particles
+        self._init_particles_probs = (torch.ones(self._num_particles) / self._num_particles).to(device)
 
-        return self._init_particles
+        return (self._init_particles, self._init_particles_probs)
 
     def motion_update(self, actions: np.ndarray, particles: torch.Tensor) -> torch.Tensor:
         """
@@ -155,7 +155,7 @@ class DMCL():
 
         return moved_particles
 
-    def measurement_update(self, obs, particles: torch.Tensor) -> torch.Tensor:
+    def measurement_update(self, obs: dict, particles: torch.Tensor) -> torch.Tensor:
         """
 
         :param collections.OrderedDict obs: observation from environment
@@ -172,7 +172,30 @@ class DMCL():
         input = torch.cat([encoding_input, particles], axis=-1)
 
         obs_likelihood = self._obs_like_estimator(input)
-        obs_likelihood = obs_likelihood * (1 - self._min_obs_likelihood) + \
-                            self._min_obs_likelihood
-        
-        return obs_likelihood
+        # obs_likelihood = obs_likelihood * (1 - self._min_obs_likelihood) + \
+        #                     self._min_obs_likelihood
+
+        return obs_likelihood.squeeze(1)
+
+    def resample_particles(self, particles:torch.Tensor, particle_probs: torch.Tensor) -> torch.Tensor:
+        """
+        stochastic universal resampling according to particle weight (probs)
+        """
+
+        low = 0.0
+        step = 1 / self._num_particles
+        rnd_offset = ((low - step) * torch.rand(1) + step).to(device)    # uniform random [0, step]
+        cum_prob = particle_probs[0]
+        i = 0
+
+        new_particles = []
+        for idx in range(self._num_particles):
+            while rnd_offset > cum_prob:
+                i += 1
+                cum_prob += particle_probs[i]
+
+            new_particles.append(particles[i]) # add the particle
+            rnd_offset += step
+
+        new_particles = torch.stack(new_particles, axis=0)
+        return new_particles
