@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from gibson2.envs.locomotor_env import NavigateRandomEnv
+from gibson2.envs.locomotor_env import NavigateEnv, NavigateRandomEnv
 from gibson2.utils.utils import parse_config
 from gibson2.utils.assets_utils import get_model_path
 from gibson2.core.render.profiler import Profiler
@@ -50,6 +50,15 @@ def getKey() -> int:
         key = ord(key)
     return key
 
+def wrap_angle(angle):
+    return ( (angle-np.pi) % (2*np.pi) ) - np.pi
+
+def get_pose(robot):
+    position = robot.get_position()
+    euler = quat2euler(robot.get_orientation())
+    pose = np.array([position[0], position[2], wrap_angle(euler[0])])
+    return pose
+
 def teleop_robot(nav_env: NavigateEnv):
     """
     """
@@ -76,7 +85,19 @@ q to quit
             action = turtlebot.keys_to_action[()]
 
         state, reward, done, info = nav_env.step(action)
-        print(state['sensor'], turtlebot.get_position(), quat2euler(turtlebot.get_orientation()))
+        episode_data = {
+            'step': i,
+            'state':{
+                'sensor': state['sensor'],
+                'rgb': state['rgb'],
+                'depth': state['depth'],
+                'scan': state['depth'],
+                'pose': get_pose(turtlebot),
+            },
+            'reward': reward,
+            'done': done,
+        }
+        print(turtlebot.get_position(), quat2euler(turtlebot.get_orientation()))
         if done:
             print('Episode finished')
             break
@@ -90,8 +111,26 @@ def main():
 
     trav_map = load_floor(config_data)
 
-    nav_env = NavigateRandomEnv(config_file=config_file_path, mode='gui')
+    nav_env = NavigateEnv(config_file=config_file_path, mode='gui')
     teleop_robot(nav_env)
+
+def collect_data():
+    curr_dir_path = os.path.dirname(os.path.abspath(__file__))
+
+    # configuration file contains: robot, scene, etc. details
+    config_file_path = os.path.join(curr_dir_path, 'turtlebot.yaml')
+
+    nav_env = NavigateEnv(config_file=config_file_path, mode='gui')
+    for episode_idx in range(10):
+        nav_env.reset()
+        for step_idx in range(100):
+            with Profiler('Env action step'):
+                action = nav_env.action_space.sample()
+                state, reward, done, info = nav_env.step(action)
+                if done:
+                    print('Episode finished after {0} timesteps'.format(step_idx + 1))
+                    break
 
 if __name__ == '__main__':
     main()
+    #collect_data()
