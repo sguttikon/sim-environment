@@ -20,8 +20,8 @@ class DMCL():
         """
 
         self._state_dim = 3 # robot's pose [x, y, theta]
-        self._action_dim = 2
-        self._num_particles = 10
+        self._action_dim = 2 # [linear_vel, angular_vel]
+        self._num_particles = 1000
         self._init_particles = None
         self._init_particles_probs = None   # shape (num, state_dim)
         self._state_range = None
@@ -94,9 +94,10 @@ class DMCL():
     def initialize_particles(self, init_pose: np.ndarray) -> (torch.Tensor, torch.Tensor):
         """
         """
+        radius = 3
         self._state_range = np.array([
-            [init_pose[0] - 1, init_pose[0] + 1],
-            [init_pose[1] - 1, init_pose[1] + 1],
+            [init_pose[0] - radius, init_pose[0] + radius],
+            [init_pose[1] - radius, init_pose[1] + radius],
             [-np.pi, np.pi]
         ])
 
@@ -180,6 +181,10 @@ class DMCL():
     def resample_particles(self, particles:torch.Tensor, particle_probs: torch.Tensor) -> torch.Tensor:
         """
         stochastic universal resampling according to particle weight (probs)
+
+        :param torch.Tensor particles: motion updated particles
+        :param torch.Tensor particle_probs: likelihood of particles
+        :return torch.Tensor: resampled particles
         """
 
         low = 0.0
