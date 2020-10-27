@@ -26,12 +26,15 @@ class DMCL():
         self._init_particles_probs = None   # shape (num, state_dim)
         self._state_range = None
 
+        self._min_obs_likelihood = 0.004
+
         self._build_modules()
 
     def _build_modules(self):
         """
         """
 
+        #
         self._noise_generator = nn.Sequential(
                 nn.Linear(2 * self._action_dim, 32),
                 nn.ReLU(),
@@ -41,7 +44,52 @@ class DMCL():
                 nn.ReLU(),
         ).to(device)
 
-        self._encoder = None
+        #
+        N, C, H, W = 1, 3, 480, 640
+        conv_config = np.array([
+            [3, 48, 7, 3, 5],
+            [48, 128, 7, 3, 5],
+        ])
+        for idx in range(len(conv_config)):
+            W = (W - conv_config[idx][2] + 2*conv_config[idx][3]) \
+                    / conv_config[idx][4] + 1
+            H = (H - conv_config[idx][2] + 2*conv_config[idx][3]) \
+                    / conv_config[idx][4] + 1
+            C = conv_config[idx][1]
+        conv_output = N*C*int(H)*int(W)
+
+        self._encoder = nn.Sequential(
+                nn.Conv2d(in_channels=conv_config[0][0],
+                          out_channels=conv_config[0][1],
+                          kernel_size=conv_config[0][2],
+                          padding=conv_config[0][3],
+                          stride=conv_config[0][4]),
+                nn.ReLU(),
+                nn.Dropout(p=0.1),
+                nn.Conv2d(in_channels=conv_config[1][0],
+                          out_channels=conv_config[1][1],
+                          kernel_size=conv_config[1][2],
+                          padding=conv_config[1][3],
+                          stride=conv_config[1][4]),
+                nn.ReLU(),
+                nn.Dropout(p=0.1),
+                nn.Flatten(),
+                nn.Linear(conv_output, 4096),
+                nn.ReLU(),
+                nn.Dropout(p=0.5),
+                nn.Linear(4096, 128),
+                nn.ReLU(),
+        ).to(device)
+
+        #
+        self._obs_like_estimator = nn.Sequential(
+                nn.Linear(128 + 3, 128),
+                nn.ReLU(),
+                nn.Linear(128, 128),
+                nn.ReLU(),
+                nn.Linear(128, 1),
+                nn.Sigmoid()
+        )
 
     def initialize_particles(self, init_pose: np.ndarray):
         """
@@ -62,16 +110,22 @@ class DMCL():
 
         self._init_particles_probs = torch.ones(self._num_particles).to(device) / self._num_particles
 
-    def motion_update(self, actions, particles) -> torch.Tensor:
+        return self._init_particles
+
+    def motion_update(self, actions: np.ndarray, particles: torch.Tensor) -> torch.Tensor:
         """
-        Motion Update based on Velocity Model
+        motion update based on velocity model
 
         :param np.ndarray actions: linear and angular velocity commands
         :param torch.Tensor particles: belief represented by particles
+        :return torch.Tensor: motion updated particles
         """
 
-        action_input = np.tile(actions, (particles.shape[0], 1))
-        action_input = torch.from_numpy(action_input).float().to(device)
+        #action_input = np.tile(actions, (particles.shape[0], 1))
+        #action_input = torch.from_numpy(action_input).float().to(device)
+
+        actions = torch.from_numpy(actions).float().to(device)
+        action_input = actions.repeat(particles.shape[0], 1)
         random_input = torch.normal(mean=0.0, std=1.0, size=action_input.shape).to(device)
         input = torch.cat([action_input, random_input], axis=-1)
 
@@ -100,3 +154,25 @@ class DMCL():
         moved_particles = torch.cat([new_x, new_y, new_theta], axis=-1)
 
         return moved_particles
+
+    def measurement_update(self, obs, particles: torch.Tensor) -> torch.Tensor:
+        """
+
+        :param collections.OrderedDict obs: observation from environment
+        :param torch.Tensor particles: belief represented by particles
+        :return torch.Tensor: likelihood of particles
+        """
+
+        rgb = obs['rgb'].float().to(device)
+        rgb = rgb.unsqueeze(0).permute(0, 3, 1, 2) # from NHWC to NCHW
+        #depth = obs['depth'].to(device)
+
+        encoding = self._encoder(rgb)
+        encoding_input = encoding.repeat(particles.shape[0], 1)
+        input = torch.cat([encoding_input, particles], axis=-1)
+
+        obs_likelihood = self._obs_like_estimator(input)
+        obs_likelihood = obs_likelihood * (1 - self._min_obs_likelihood) + \
+                            self._min_obs_likelihood
+        
+        return obs_likelihood

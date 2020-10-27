@@ -29,18 +29,23 @@ def train_network(env):
     while epoch < num_epochs:
         epoch += 1
 
-        env.reset()
+        obs = env.reset()
         init_pose = get_pose(turtlebot)
-        dmcl.initialize_particles(init_pose)
+        particles = dmcl.initialize_particles(init_pose)
+
+        # motion update
         action = env.action_space.sample()
-        dmcl.motion_update(action, dmcl._init_particles)
+        particles = dmcl.motion_update(action, particles)
+
+        # measurement update
+        probs = dmcl.measurement_update(obs, particles)
 
 if __name__ == '__main__':
     # configuration file contains: robot, scene, etc. details
     config_file_path = os.path.join(curr_dir_path, 'turtlebot.yaml')
 
     mode = 'headless' # []'headless', 'gui']
-    render_to_tensor=False
+    render_to_tensor=True
     nav_env = NavigateEnv(config_file=config_file_path,
                             mode=mode,
                             render_to_tensor=render_to_tensor)
