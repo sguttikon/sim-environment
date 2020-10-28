@@ -57,17 +57,28 @@ def train_network(env):
             action = env.action_space.sample()
             obs, reward, done, info = nav_env.step(action)
 
-            # motion update
+            ## motion update
             particles = dmcl.motion_update(action, particles)
 
-            # measurement update
+            # define motion model loss and optimizer
+            curr_pose = get_pose(turtlebot)
+            new_pose = torch.from_numpy(curr_pose).to(dmcl.get_device())
+            sq_distance = utils.compute_sq_distance(particles, new_pose)
+            std = 0.01
+            pdf = (1/dmcl.get_num_particles()) * (1/np.sqrt(2*np.pi*std**2)) \
+                    * torch.exp(-sq_distance / (2*np.pi*std**2))
+
+            motion_loss = torch.mean(-torch.log(1e-16 + pdf), axis=0)
+
+            ## measurement update
             particle_probs *= dmcl.measurement_update(obs, particles)
             particle_probs /= torch.sum(particle_probs, axis=0) # normalize probabilities
 
-            # resample
-            particles = dmcl.resample_particles(particles, particle_probs)
+            state = dmcl.particles_to_state(particles, particle_probs)
 
-    print(particles)
+            ## resample
+            particles = dmcl.resample_particles(particles, particle_probs)
+    #print(particles)
 
 def plot_robot(pose, pose_plt, heading_plt, scale= 0.1):
     """

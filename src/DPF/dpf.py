@@ -30,6 +30,18 @@ class DMCL():
 
         self._build_modules()
 
+    def get_device(self) -> torch.device:
+        """
+        return the currenly running device name
+        """
+        return device
+
+    def get_num_particles(self) -> int:
+        """
+        return the number of particles
+        """
+        return self._num_particles
+
     def _build_modules(self):
         """
         """
@@ -45,7 +57,7 @@ class DMCL():
         ).to(device)
 
         #
-        N, C, H, W = 1, 3, 480, 640
+        N, C, H, W = 1, 3, 240, 320 # refer turtlebot.yaml of rgb specs
         conv_config = np.array([
             [3, 48, 7, 3, 5],
             [48, 128, 7, 3, 5],
@@ -58,6 +70,7 @@ class DMCL():
             C = conv_config[idx][1]
         conv_output = N*C*int(H)*int(W)
 
+        #
         self._encoder = nn.Sequential(
                 nn.Conv2d(in_channels=conv_config[0][0],
                           out_channels=conv_config[0][1],
@@ -204,3 +217,18 @@ class DMCL():
 
         new_particles = torch.stack(new_particles, axis=0)
         return new_particles
+
+    def particles_to_state(self, particles:torch.Tensor, particle_probs:torch.Tensor) -> torch.Tensor:
+        """
+        gaussian mixture model, we treat each particle as a gaussian in a mixture with weights
+
+        :param torch.Tensor particles: particles
+        :param torch.Tensor particle_probs: likelihood of particles
+        :return torch.tensor robot pose belief
+        """
+        mean_position = torch.sum(particle_probs.unsqueeze(1) * particles[:, :2], axis=0)
+        mean_orientation = torch.atan2(
+            torch.sum(particle_probs.unsqueeze(1) * torch.sin(particles[:, 2:3]), axis=0),
+            torch.sum(particle_probs.unsqueeze(1) * torch.cos(particles[:, 2:3]), axis=0)
+        )
+        return torch.cat([mean_position, mean_orientation])
