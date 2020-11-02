@@ -27,68 +27,55 @@ class DMCL():
         """
         """
 
-        self._state_dim = 3 # robot's pose [x, y, theta]
-        self._action_dim = 2 # [linear_vel, angular_vel]
-        self._num_particles = 1000
-        self._init_particles = None
-        self._init_particles_probs = None   # shape (num, state_dim)
-        self._state_range = None
-
-        self._min_obs_likelihood = 0.004
+        self.__state_dim = 3 # robot's pose [x, y, theta]
+        self.__action_dim = 2 # [linear_vel, angular_vel]
+        self.__num_particles = 5000
+        self.__particles = None    # shape (num, state_dim)
+        self.__particles_probs = None
 
         # ui display
         fig = plt.figure(figsize=(7, 7))
-        self._plt_ax = fig.add_subplot(111)
+        self.__plt_ax = fig.add_subplot(111)
         plt.ion()
         plt.show()
 
-        self._plots = {
+        self.__plots = {
             'map': None,
             'gt_pose': None,
             'gt_heading': None,
+            'est_pose': None,
+            'est_heading': None,
+            'particles_cloud': None,
         }
-        self._map_scale = 1.
+        self.__map_scale = 1.
 
         self.__configure_env(env_config_file)
-        self._build_modules()
+        self.__build_modules()
 
     def __configure_env(self, env_config_file: str):
         """
         """
 
-        self._config_data = parse_config(env_config_file)
+        self.__config_data = parse_config(env_config_file)
+        self.__map_scale = self.__config_data['trav_map_resolution']
 
-        self._env = NavigateEnv(config_file = env_config_file,
+        self.__env = NavigateRandomEnv(config_file = env_config_file,
                                 mode = 'headless', # ['headless', 'gui']
                                 render_to_tensor = True)
 
-        self._robot = self._env.robots[0] # hard coded
+        self.__robot = self.__env.robots[0] # hard coded
 
-        self.__update_figures()
-
-    def get_device(self) -> torch.device:
-        """
-        return the currenly running device name
-        """
-        return device
-
-    def get_num_particles(self) -> int:
-        """
-        return the number of particles
-        """
-        return self._num_particles
-
-    def _build_modules(self):
+    def __build_modules(self):
         """
         """
 
         #
-        self._noise_generator = nn.Sequential(
-                nn.Linear(2 * self._action_dim, 32),
+        self.__noise_generator = nn.Sequential(
+                nn.Linear(2 * self.__action_dim, 32),
                 nn.ReLU(),
                 nn.Linear(32, 32),
                 nn.ReLU(),
-                nn.Linear(32, self._state_dim),
+                nn.Linear(32, self.__state_dim),
                 nn.ReLU(),
         ).to(device)
 
@@ -107,7 +94,7 @@ class DMCL():
         conv_output = N*C*int(H)*int(W)
 
         #
-        self._encoder = nn.Sequential(
+        self.__encoder = nn.Sequential(
                 nn.Conv2d(in_channels=conv_config[0][0],
                           out_channels=conv_config[0][1],
                           kernel_size=conv_config[0][2],
@@ -131,7 +118,7 @@ class DMCL():
         ).to(device)
 
         #
-        self._obs_like_estimator = nn.Sequential(
+        self.__obs_like_estimator = nn.Sequential(
                 nn.Linear(128 + 3, 128),
                 nn.ReLU(),
                 nn.Linear(128, 128),
@@ -140,11 +127,11 @@ class DMCL():
                 nn.Softmax(dim=0)
         ).to(device)
 
-    def initialize_particles(self, init_pose: np.ndarray) -> (torch.Tensor, torch.Tensor):
+    def __init_particles(self, init_pose: np.ndarray) -> (torch.Tensor, torch.Tensor):
         """
         """
-        radius = 3
-        self._state_range = np.array([
+        radius = 5 / self.__map_scale
+        state_range = np.array([
             [init_pose[0] - radius, init_pose[0] + radius],
             [init_pose[1] - radius, init_pose[1] + radius],
             [-np.pi, np.pi]
@@ -152,17 +139,18 @@ class DMCL():
 
         # random uniform particles between [low, high]
         # reference: https://stackoverflow.com/questions/44328530/how-to-get-a-uniform-distribution-in-a-range-r1-r2-in-pytorch
-        self._init_particles = torch.cat([
-            (self._state_range[d][0] - self._state_range[d][1]) *
-                torch.rand(self._num_particles, 1) + self._state_range[d][1]
-                    for d in range(self._state_dim)
+        self.__particles = torch.cat([
+            (state_range[d][0] - state_range[d][1]) *
+                torch.rand(self.__num_particles, 1) + state_range[d][1]
+                    for d in range(self.__state_dim)
         ], axis = -1).to(device)
 
-        self._init_particles_probs = (torch.ones(self._num_particles) / self._num_particles).to(device)
+        self.__particles_probs = (torch.ones(self.__num_particles) \
+                                    / self.__num_particles).to(device)
 
-        return (self._init_particles, self._init_particles_probs)
+        return (self.__particles, self.__particles_probs)
 
-    def motion_update(self, actions: np.ndarray, particles: torch.Tensor) -> torch.Tensor:
+    def __motion_update(self, actions: np.ndarray, particles: torch.Tensor) -> torch.Tensor:
         """
         motion update based on velocity model
 
@@ -180,7 +168,7 @@ class DMCL():
         input = torch.cat([action_input, random_input], axis=-1)
 
         # estimate action noise
-        delta = self._noise_generator(input)
+        delta = self.__noise_generator(input)
 
         # add zero-mean action noise to original actions
         delta -= torch.mean(delta, 1, True)
@@ -205,7 +193,7 @@ class DMCL():
 
         return moved_particles
 
-    def measurement_update(self, obs: dict, particles: torch.Tensor) -> torch.Tensor:
+    def __measurement_update(self, obs: dict, particles: torch.Tensor) -> torch.Tensor:
         """
 
         :param collections.OrderedDict obs: observation from environment
@@ -217,17 +205,17 @@ class DMCL():
         rgb = rgb.unsqueeze(0).permute(0, 3, 1, 2) # from NHWC to NCHW
         #depth = obs['depth'].to(device)
 
-        encoding = self._encoder(rgb)
+        encoding = self.__encoder(rgb)
         encoding_input = encoding.repeat(particles.shape[0], 1)
         input = torch.cat([encoding_input, particles], axis=-1)
 
-        obs_likelihood = self._obs_like_estimator(input)
+        obs_likelihood = self.__obs_like_estimator(input)
         # obs_likelihood = obs_likelihood * (1 - self._min_obs_likelihood) + \
         #                     self._min_obs_likelihood
 
         return obs_likelihood.squeeze(1)
 
-    def resample_particles(self, particles:torch.Tensor, particle_probs: torch.Tensor) -> torch.Tensor:
+    def __resample_particles(self, particles:torch.Tensor, particle_probs: torch.Tensor) -> torch.Tensor:
         """
         stochastic universal resampling according to particle weight (probs)
 
@@ -237,13 +225,13 @@ class DMCL():
         """
 
         low = 0.0
-        step = 1 / self._num_particles
+        step = 1./self.__num_particles
         rnd_offset = ((low - step) * torch.rand(1) + step).to(device)    # uniform random [0, step]
         cum_prob = particle_probs[0]
         i = 0
 
         new_particles = []
-        for idx in range(self._num_particles):
+        for idx in range(self.__num_particles):
             while rnd_offset > cum_prob:
                 i += 1
                 cum_prob += particle_probs[i]
@@ -254,7 +242,7 @@ class DMCL():
         new_particles = torch.stack(new_particles, axis=0)
         return new_particles
 
-    def particles_to_state(self, particles:torch.Tensor, particle_probs:torch.Tensor) -> torch.Tensor:
+    def __particles_to_state(self, particles:torch.Tensor, particle_probs:torch.Tensor) -> torch.Tensor:
         """
         gaussian mixture model, we treat each particle as a gaussian in a mixture with weights
 
@@ -267,33 +255,68 @@ class DMCL():
             torch.sum(particle_probs.unsqueeze(1) * torch.sin(particles[:, 2:3]), axis=0),
             torch.sum(particle_probs.unsqueeze(1) * torch.cos(particles[:, 2:3]), axis=0)
         )
-        return torch.cat([mean_position, mean_orientation])
+        return torch.cat([mean_position, mean_orientation], axis=0)
+
+    def __state_to_particles(self, state: torch.Tensor):
+        """
+        """
+
+        mean = state
+        cov = torch.eye(3).to(device) * 0.1
+        mvn = torch.distributions.multivariate_normal.MultivariateNormal(mean, cov)
+
+        particles = []
+        for idx in range(self.__num_particles):
+            particles.append(mvn.sample())
+
+        particles = torch.stack(particles, axis=0)
+        return particles
 
     def __update_figures(self):
         """
         """
-        self._plots['map'] = self.__plot_map(self._plots['map'])
-        self._plots['gt_pose'], self._plots['gt_heading'] = self.__plot_robot_gt(
-                                    self._plots['gt_pose'],
-                                    self._plots['gt_heading'],
-                                    'blue'
+        self.__plots['map'] = self.__plot_map(self.__plots['map'])
+        self.__plots['gt_pose'], self.__plots['gt_heading'] = self.__plot_robot_gt(
+                                    self.__plots['gt_pose'],
+                                    self.__plots['gt_heading']
+                                )
+        self.__plots['est_pose'], self.__plots['est_heading'] = self.__plot_robot_est(
+                                    self.__plots['est_pose'],
+                                    self.__plots['est_heading']
+                                )
+        self.__plots['particles_cloud'] = self.__plot_particle_cloud(
+                                    self.__plots['particles_cloud']
                                 )
 
         plt.draw()
         plt.pause(0.00000000001)
 
-    def __plot_robot_gt(self, pose_plt, heading_plt, color: str = 'blue'):
+    def __plot_robot_gt(self, pose_plt, heading_plt):
         """
         """
 
-        pose_x, pose_y, heading = self.get_gt_pose()
+        pose = self.get_gt_pose()
+        return self.__plot_robot_pose(pose, pose_plt, heading_plt, 'navy')
+
+    def __plot_robot_est(self, pose_plt, heading_plt):
+        """
+        """
+
+        pose = self.get_est_pose()
+        return self.__plot_robot_pose(pose, pose_plt, heading_plt, 'maroon')
+
+    def __plot_robot_pose(self, robot_pose, pose_plt, heading_plt, color: str):
+        """
+        """
+
+        pose_x, pose_y, heading = robot_pose
 
         # rescale position
-        pose_x = pose_x * self._map_scale
-        pose_y = pose_y * self._map_scale
+        pose_x = pose_x * self.__map_scale
+        pose_y = pose_y * self.__map_scale
 
-        robot_radius = 10. * self._map_scale
-        arrow_len = 10.0 * self._map_scale
+        robot_radius = 10. * self.__map_scale
+        arrow_len = 10.0 * self.__map_scale
 
         xdata = [pose_x, pose_x + (robot_radius + arrow_len) * np.cos(heading)]
         ydata = [pose_y, pose_y + (robot_radius + arrow_len) * np.sin(heading)]
@@ -302,8 +325,8 @@ class DMCL():
             pose_plt = Wedge((pose_x, pose_y),
                              robot_radius, 0, 360,
                              color=color, alpha=0.5)
-            self._plt_ax.add_artist(pose_plt)
-            heading_plt, = self._plt_ax.plot(xdata, ydata, color=color, alpha=0.5)
+            self.__plt_ax.add_artist(pose_plt)
+            heading_plt, = self.__plt_ax.plot(xdata, ydata, color=color, alpha=0.5)
         else:
             pose_plt.update({
                         'center' : [pose_x, pose_y]
@@ -319,15 +342,14 @@ class DMCL():
         """
         """
 
-        model_id = self._config_data['model_id']
-        self._map_scale = self._config_data['trav_map_resolution']
+        model_id = self.__config_data['model_id']
 
         model_path = get_model_path(model_id)
         with open(os.path.join(model_path, 'floors.txt'), 'r') as f:
             floors = sorted(list(map(float, f.readlines())))
 
-        # default considering only ground floor map
-        floor_idx = 0
+        # default considering floor env is pointing to
+        floor_idx = self.__env.floor_num
         trav_map = cv2.imread(os.path.join(model_path,
                                 'floor_trav_{0}.png'.format(floor_idx)))
         obs_map = cv2.imread(os.path.join(model_path,
@@ -336,30 +358,45 @@ class DMCL():
         origin_x, origin_y = 0., 0. # hard coded
 
         rows, cols, _ = trav_map.shape
-        x_max = (cols/2 + origin_x) * self._map_scale
-        x_min = (-cols/2 + origin_x) * self._map_scale
-        y_max = (rows/2 + origin_y) * self._map_scale
-        y_min = (-rows/2 + origin_y) * self._map_scale
+        x_max = (cols/2 + origin_x) * self.__map_scale
+        x_min = (-cols/2 + origin_x) * self.__map_scale
+        y_max = (rows/2 + origin_y) * self.__map_scale
+        y_min = (-rows/2 + origin_y) * self.__map_scale
         extent = [x_min, x_max, y_min, y_max]
 
         if map_plt == None:
-            map_plt = self._plt_ax.imshow(trav_map, cmap=plt.cm.binary, origin='upper', extent=extent)
+            map_plt = self.__plt_ax.imshow(trav_map, cmap=plt.cm.binary, origin='upper', extent=extent)
 
-            self._plt_ax.plot(origin_x, origin_y, 'm+', markersize=12)
-            self._plt_ax.grid()
-            self._plt_ax.set_xlim([x_min, x_max])
-            self._plt_ax.set_ylim([y_min, y_max])
+            self.__plt_ax.plot(origin_x, origin_y, 'm+', markersize=12)
+            self.__plt_ax.grid()
+            self.__plt_ax.set_xlim([x_min, x_max])
+            self.__plt_ax.set_ylim([y_min, y_max])
 
             ticks_x = np.linspace(x_min, x_max)
             ticks_y = np.linspace(y_min, y_max)
-            self._plt_ax.set_xticks(ticks_x, ' ')
-            self._plt_ax.set_yticks(ticks_y, ' ')
-            self._plt_ax.set_xlabel('x coords')
-            self._plt_ax.set_xlabel('y coords')
+            self.__plt_ax.set_xticks(ticks_x, ' ')
+            self.__plt_ax.set_yticks(ticks_y, ' ')
+            self.__plt_ax.set_xlabel('x coords')
+            self.__plt_ax.set_xlabel('y coords')
         else:
             pass
 
         return map_plt
+
+    def __plot_particle_cloud(self, particles_plt):
+        """
+        """
+
+        particles = self.__particles.cpu().detach().numpy()
+        particles[:, 0:2] = particles[:, 0:2] * self.__map_scale
+
+        if particles_plt == None:
+            particles_plt = plt.scatter(particles[:, 0], particles[:, 1],
+                                            s=12, c='coral', alpha=0.5)
+        else:
+            particles_plt.set_offsets(particles[:, 0:2])
+
+        return particles_plt
 
     #############################
     ##### PUBLIC METHODS
@@ -368,8 +405,8 @@ class DMCL():
     def get_gt_pose(self):
         """
         """
-        position = self._robot.get_position()
-        euler = quat2euler(self._robot.get_orientation())
+        position = self.__robot.get_position()
+        euler = quat2euler(self.__robot.get_orientation())
         gt_pose = np.array([
             position[0],
             position[1],
@@ -377,5 +414,50 @@ class DMCL():
         ])
         return gt_pose
 
+    def get_est_pose(self):
+        """
+        """
+        pose = self.__particles_to_state(self.__particles, self.__particles_probs)
+        return pose.cpu().detach().numpy()
+
     def train(self):
-        pass
+        num_epochs = 5
+        epoch_len = 10
+
+        curr_epoch = 0
+        while curr_epoch < num_epochs:
+            curr_epoch += 1
+            obs = self.__env.reset()
+
+            gt_pose = self.get_gt_pose()
+            print(gt_pose)
+            self.__init_particles(gt_pose)
+            self.__update_figures()
+
+            for curr_step in range(epoch_len):
+
+                # take the action in environment
+                action = self.__env.action_space.sample() # will be changed to rl action
+                obs, reward, done, info = self.__env.step(action)
+
+                ##### motion update #####
+
+                self.__particles = self.__motion_update(action, self.__particles)
+
+                gt_pose = torch.from_numpy(self.get_gt_pose()).to(device)
+                sq_dist = utils.compute_sq_distance(self.__particles, gt_pose)
+                std = 0.01
+                mvn_pdf = (1/self.__num_particles) * (1/np.sqrt(2 * np.pi * std**2)) \
+                            * torch.exp(-sq_dist / (2 * np.pi * std**2))
+                motion_loss = torch.mean(-torch.log(1e-16 + mvn_pdf), axis=0)
+
+                ##### measurement update #####
+
+                self.__particles_probs *= self.__measurement_update(obs, self.__particles)
+                self.__particles_probs /= torch.sum(self.__particles_probs, axis=0) # normalize probabilities
+
+                ##### resample particles #####
+
+                self.__particles = self.__resample_particles(self.__particles, self.__particles_probs)
+
+                self.__update_figures()
