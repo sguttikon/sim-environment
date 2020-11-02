@@ -4,6 +4,14 @@ import numpy as np
 import torch
 import torch.nn as nn
 import utils
+import matplotlib.pyplot as plt
+from matplotlib.patches import Wedge
+from gibson2.utils.utils import parse_config
+from gibson2.utils.assets_utils import get_model_path
+from gibson2.envs.locomotor_env import NavigateEnv, NavigateRandomEnv
+from transforms3d.euler import quat2euler
+import os
+import cv2
 
 if torch.cuda.is_available():
     device = torch.device('cuda')
@@ -15,7 +23,7 @@ class DMCL():
     Differentiable Monte Carlo Localization class implementation
     """
 
-    def __init__(self):
+    def __init__(self, env_config_file: str):
         """
         """
 
@@ -28,7 +36,35 @@ class DMCL():
 
         self._min_obs_likelihood = 0.004
 
+        # ui display
+        fig = plt.figure(figsize=(7, 7))
+        self._plt_ax = fig.add_subplot(111)
+        plt.ion()
+        plt.show()
+
+        self._plots = {
+            'map': None,
+            'gt_pose': None,
+            'gt_heading': None,
+        }
+        self._map_scale = 1.
+
+        self.__configure_env(env_config_file)
         self._build_modules()
+
+    def __configure_env(self, env_config_file: str):
+        """
+        """
+
+        self._config_data = parse_config(env_config_file)
+
+        self._env = NavigateEnv(config_file = env_config_file,
+                                mode = 'headless', # ['headless', 'gui']
+                                render_to_tensor = True)
+
+        self._robot = self._env.robots[0] # hard coded
+
+        self.__update_figures()
 
     def get_device(self) -> torch.device:
         """
@@ -232,3 +268,114 @@ class DMCL():
             torch.sum(particle_probs.unsqueeze(1) * torch.cos(particles[:, 2:3]), axis=0)
         )
         return torch.cat([mean_position, mean_orientation])
+
+    def __update_figures(self):
+        """
+        """
+        self._plots['map'] = self.__plot_map(self._plots['map'])
+        self._plots['gt_pose'], self._plots['gt_heading'] = self.__plot_robot_gt(
+                                    self._plots['gt_pose'],
+                                    self._plots['gt_heading'],
+                                    'blue'
+                                )
+
+        plt.draw()
+        plt.pause(0.00000000001)
+
+    def __plot_robot_gt(self, pose_plt, heading_plt, color: str = 'blue'):
+        """
+        """
+
+        pose_x, pose_y, heading = self.get_gt_pose()
+
+        # rescale position
+        pose_x = pose_x * self._map_scale
+        pose_y = pose_y * self._map_scale
+
+        robot_radius = 10. * self._map_scale
+        arrow_len = 10.0 * self._map_scale
+
+        xdata = [pose_x, pose_x + (robot_radius + arrow_len) * np.cos(heading)]
+        ydata = [pose_y, pose_y + (robot_radius + arrow_len) * np.sin(heading)]
+
+        if pose_plt == None:
+            pose_plt = Wedge((pose_x, pose_y),
+                             robot_radius, 0, 360,
+                             color=color, alpha=0.5)
+            self._plt_ax.add_artist(pose_plt)
+            heading_plt, = self._plt_ax.plot(xdata, ydata, color=color, alpha=0.5)
+        else:
+            pose_plt.update({
+                        'center' : [pose_x, pose_y]
+            })
+            heading_plt.update({
+                        'xdata' : xdata,
+                        'ydata' : ydata,
+            })
+
+        return pose_plt, heading_plt
+
+    def __plot_map(self, map_plt):
+        """
+        """
+
+        model_id = self._config_data['model_id']
+        self._map_scale = self._config_data['trav_map_resolution']
+
+        model_path = get_model_path(model_id)
+        with open(os.path.join(model_path, 'floors.txt'), 'r') as f:
+            floors = sorted(list(map(float, f.readlines())))
+
+        # default considering only ground floor map
+        floor_idx = 0
+        trav_map = cv2.imread(os.path.join(model_path,
+                                'floor_trav_{0}.png'.format(floor_idx)))
+        obs_map = cv2.imread(os.path.join(model_path,
+                                'floor_{0}.png'.format(floor_idx)))
+
+        origin_x, origin_y = 0., 0. # hard coded
+
+        rows, cols, _ = trav_map.shape
+        x_max = (cols/2 + origin_x) * self._map_scale
+        x_min = (-cols/2 + origin_x) * self._map_scale
+        y_max = (rows/2 + origin_y) * self._map_scale
+        y_min = (-rows/2 + origin_y) * self._map_scale
+        extent = [x_min, x_max, y_min, y_max]
+
+        if map_plt == None:
+            map_plt = self._plt_ax.imshow(trav_map, cmap=plt.cm.binary, origin='upper', extent=extent)
+
+            self._plt_ax.plot(origin_x, origin_y, 'm+', markersize=12)
+            self._plt_ax.grid()
+            self._plt_ax.set_xlim([x_min, x_max])
+            self._plt_ax.set_ylim([y_min, y_max])
+
+            ticks_x = np.linspace(x_min, x_max)
+            ticks_y = np.linspace(y_min, y_max)
+            self._plt_ax.set_xticks(ticks_x, ' ')
+            self._plt_ax.set_yticks(ticks_y, ' ')
+            self._plt_ax.set_xlabel('x coords')
+            self._plt_ax.set_xlabel('y coords')
+        else:
+            pass
+
+        return map_plt
+
+    #############################
+    ##### PUBLIC METHODS
+    #############################
+
+    def get_gt_pose(self):
+        """
+        """
+        position = self._robot.get_position()
+        euler = quat2euler(self._robot.get_orientation())
+        gt_pose = np.array([
+            position[0],
+            position[1],
+            utils.wrap_angle(euler[0])
+        ])
+        return gt_pose
+
+    def train(self):
+        pass
