@@ -127,6 +127,9 @@ class DMCL():
                 nn.Softmax(dim=0)
         ).to(device)
 
+        self.__motion_optim = torch.optim.Adam(self.__noise_generator.parameters())
+        self.__measurement_optim = torch.optim.Adam(self.__obs_like_estimator.parameters())
+
     def __init_particles(self, init_pose: np.ndarray) -> (torch.Tensor, torch.Tensor):
         """
         """
@@ -163,7 +166,7 @@ class DMCL():
         #action_input = torch.from_numpy(action_input).float().to(device)
 
         actions = torch.from_numpy(actions).float().to(device)
-        action_input = actions.repeat(particles.shape[0], 1)
+        action_input = actions.repeat(self.__num_particles, 1)
         random_input = torch.normal(mean=0.0, std=1.0, size=action_input.shape).to(device)
         input = torch.cat([action_input, random_input], axis=-1)
 
@@ -206,7 +209,7 @@ class DMCL():
         #depth = obs['depth'].to(device)
 
         encoding = self.__encoder(rgb)
-        encoding_input = encoding.repeat(particles.shape[0], 1)
+        encoding_input = encoding.repeat(self.__num_particles, 1)
         input = torch.cat([encoding_input, particles], axis=-1)
 
         obs_likelihood = self.__obs_like_estimator(input)
@@ -295,14 +298,14 @@ class DMCL():
         """
         """
 
-        pose = self.get_gt_pose()
+        pose = self.get_gt_pose(to_tensor=False)
         return self.__plot_robot_pose(pose, pose_plt, heading_plt, 'navy')
 
     def __plot_robot_est(self, pose_plt, heading_plt):
         """
         """
 
-        pose = self.get_est_pose()
+        pose = self.get_est_pose(to_tensor=False)
         return self.__plot_robot_pose(pose, pose_plt, heading_plt, 'maroon')
 
     def __plot_robot_pose(self, robot_pose, pose_plt, heading_plt, color: str):
@@ -377,7 +380,7 @@ class DMCL():
             self.__plt_ax.set_xticks(ticks_x, ' ')
             self.__plt_ax.set_yticks(ticks_y, ' ')
             self.__plt_ax.set_xlabel('x coords')
-            self.__plt_ax.set_xlabel('y coords')
+            self.__plt_ax.set_ylabel('y coords')
         else:
             pass
 
@@ -398,11 +401,61 @@ class DMCL():
 
         return particles_plt
 
+    def __compute_motion_loss(self):
+        """
+        """
+        gt_pose = self.get_gt_pose(to_tensor = True)
+        sq_dist = utils.compute_sq_distance(self.__particles, gt_pose)
+        std = 0.01
+        mvn_pdf = (1/self.__num_particles) * (1/np.sqrt(2 * np.pi * std**2)) \
+                        * torch.exp(-sq_dist / (2 * np.pi * std**2))
+        loss = torch.mean(-torch.log(1e-16 + mvn_pdf), axis=0)
+
+        return loss
+
+    def __compute_measurement_loss(self, temperature=0.07, base_temperature=0.07):
+        """
+        """
+        # reference https://github.com/wangz10/contrastive_loss/blob/master/losses.py#L104
+        # and https://github.com/HobbitLong/SupContrast/blob/master/losses.py
+
+        gt_pose = self.get_gt_pose(to_tensor = True)
+        features = torch.sqrt(utils.compute_sq_distance(self.__particles, gt_pose)).unsqueeze(1)
+        labels = torch.zeros([self.__num_particles, 1]).to(device)
+
+        use_labels = True
+        if use_labels:
+            mask = torch.eq(labels, labels.T).float().to(device)
+        else:
+            mask = torch.eye(self.__num_particles).float().to(device)
+
+        # compute logits
+        anchor_dot_contrast = torch.div(torch.matmul(features, features.T), temperature)
+        # for numerical stability
+        logits_max, _ = torch.max(anchor_dot_contrast, dim=1, keepdim=True)
+        logits = anchor_dot_contrast - logits_max
+
+        # tile mask
+        logits_mask = torch.ones_like(mask).to(device) - \
+                            torch.eye(self.__num_particles).to(device)
+        mask = mask * logits_mask
+
+        # compute log_prob
+        exp_logits = torch.exp(logits) * logits_mask
+        log_prob = logits - torch.log(exp_logits.sum(dim=1, keepdim=True) + 1e-8)
+
+        # compute mean of log-likelihood over positive
+        mean_log_prob_pos = (mask * log_prob).sum(dim=1) / mask.sum(dim=1)
+
+        # loss
+        loss = - (temperature/base_temperature) * mean_log_prob_pos
+        return loss.mean()
+
     #############################
     ##### PUBLIC METHODS
     #############################
 
-    def get_gt_pose(self):
+    def get_gt_pose(self, to_tensor: bool = False):
         """
         """
         position = self.__robot.get_position()
@@ -412,17 +465,22 @@ class DMCL():
             position[1],
             utils.wrap_angle(euler[0])
         ])
+
+        if to_tensor:
+            gt_pose = torch.from_numpy(gt_pose).to(device)
         return gt_pose
 
-    def get_est_pose(self):
+    def get_est_pose(self, to_tensor: bool = False):
         """
         """
         pose = self.__particles_to_state(self.__particles, self.__particles_probs)
-        return pose.cpu().detach().numpy()
+        if not to_tensor:
+            pose = pose.cpu().detach().numpy()
+        return pose
 
     def train(self):
-        num_epochs = 5
-        epoch_len = 10
+        num_epochs = 10
+        epoch_len = 20
 
         curr_epoch = 0
         while curr_epoch < num_epochs:
@@ -430,7 +488,6 @@ class DMCL():
             obs = self.__env.reset()
 
             gt_pose = self.get_gt_pose()
-            print(gt_pose)
             self.__init_particles(gt_pose)
             self.__update_figures()
 
@@ -441,23 +498,26 @@ class DMCL():
                 obs, reward, done, info = self.__env.step(action)
 
                 ##### motion update #####
-
                 self.__particles = self.__motion_update(action, self.__particles)
-
-                gt_pose = torch.from_numpy(self.get_gt_pose()).to(device)
-                sq_dist = utils.compute_sq_distance(self.__particles, gt_pose)
-                std = 0.01
-                mvn_pdf = (1/self.__num_particles) * (1/np.sqrt(2 * np.pi * std**2)) \
-                            * torch.exp(-sq_dist / (2 * np.pi * std**2))
-                motion_loss = torch.mean(-torch.log(1e-16 + mvn_pdf), axis=0)
+                motion_loss = self.__compute_motion_loss()
+                self.__motion_optim.zero_grad()
 
                 ##### measurement update #####
-
                 self.__particles_probs *= self.__measurement_update(obs, self.__particles)
                 self.__particles_probs /= torch.sum(self.__particles_probs, axis=0) # normalize probabilities
+                measurement_loss = self.__compute_measurement_loss()
+                self.__measurement_optim.zero_grad()
 
                 ##### resample particles #####
-
                 self.__particles = self.__resample_particles(self.__particles, self.__particles_probs)
 
+                motion_loss.backward(retain_graph=True)
+                measurement_loss.backward(retain_graph=True)
+
+                self.__motion_optim.step()
+                self.__measurement_optim.step()
+
                 self.__update_figures()
+
+                print('Motion Loss: {0}, Measurement Loss: {1}'\
+                                .format(motion_loss, measurement_loss))
