@@ -450,6 +450,7 @@ class DMCL():
         std = 0.5
         mvn_pdf = (1/self.__num_particles) * (1/np.sqrt(2 * np.pi * std**2)) \
                         * torch.exp(-sq_dist / (2. * std**2))
+        # loss
         loss = torch.mean(-torch.log(1e-16 + mvn_pdf), axis=0)
 
         return loss
@@ -460,8 +461,8 @@ class DMCL():
         # reference https://github.com/wangz10/contrastive_loss/blob/master/losses.py#L104
         # and https://github.com/HobbitLong/SupContrast/blob/master/losses.py
 
-        gt_pose = self.get_gt_pose(to_tensor = True)
-        features = torch.sqrt(utils.compute_sq_distance(self.__particles, gt_pose)).unsqueeze(1)
+        gt_pose = self.get_gt_pose(to_tensor = True).repeat(self.__num_particles, 1)
+        features = torch.log(utils.compute_sq_distance(self.__particles, gt_pose)).unsqueeze(1)
         labels = torch.zeros([self.__num_particles, 1]).to(device)
 
         use_labels = True
@@ -489,8 +490,9 @@ class DMCL():
         mean_log_prob_pos = (mask * log_prob).sum(dim=1) / mask.sum(dim=1)
 
         # loss
-        loss = - (temperature/base_temperature) * mean_log_prob_pos
-        return loss.mean()
+        loss = torch.mean(-(temperature/base_temperature) * mean_log_prob_pos, axis=0)
+
+        return loss
 
     def ___plot_grad_flow(self, named_parameters):
         """
@@ -685,7 +687,6 @@ class DMCL():
                     if curr_epoch%10 == 0:
                         file_path = 'saved_models/model_train_idx{}.pt'.format(train_idx)
                         self.__save_model(file_path)
-                        print('training model is saved')
 
                 sqr_dist_error = np.sqrt(utils.compute_sq_distance(
                                                 self.get_est_pose(),
