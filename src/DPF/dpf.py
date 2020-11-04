@@ -15,11 +15,16 @@ from transforms3d.euler import quat2euler
 import os
 import cv2
 from pathlib import Path
+import random
 
+np.random.seed(42)
+random.seed(42)
 if torch.cuda.is_available():
     device = torch.device('cuda')
+    torch.cuda.manual_seed(42)
 else:
     device = torch.device('cpu')
+    torch.manual_seed(42)
 
 class DMCL():
     """
@@ -88,20 +93,18 @@ class DMCL():
         ).to(device)
 
         self.__transition_model = nn.Sequential(
-            nn.Linear(self.__state_dim + self.__action_dim, 128),
+            nn.Linear(self.__state_dim + self.__action_dim, 64),
             nn.ReLU(),
-            nn.Linear(128, 128),
+            nn.Linear(64, 64),
             nn.ReLU(),
-            nn.Linear(128, 128),
-            nn.ReLU(),
-            nn.Linear(128, self.__state_dim),
+            nn.Linear(64, self.__state_dim),
         ).to(device)
 
         #
-        N, C, H, W = 1, 3, 120, 160 # refer turtlebot.yaml of rgb specs
+        N, C, H, W = 1, 3, 64, 64 # refer turtlebot.yaml of rgb specs
         conv_config = np.array([
-            [3, 48, 7, 3, 5],
-            [48, 128, 7, 3, 5],
+            [3, 48, 5, 1, 2], # [in, out, kernel, padding, stride]
+            [48, 64, 3, 1, 1],
         ])
         for idx in range(len(conv_config)):
             W = (W - conv_config[idx][2] + 2*conv_config[idx][3]) \
@@ -128,20 +131,20 @@ class DMCL():
                 nn.ReLU(),
                 nn.Dropout(p=0.1),
                 nn.Flatten(),
-                nn.Linear(conv_output, 4096),
+                nn.Linear(conv_output, 2048),
                 nn.ReLU(),
                 nn.Dropout(p=0.5),
-                nn.Linear(4096, 128),
+                nn.Linear(2048, 64),
                 nn.ReLU(),
         ).to(device)
 
         #
         self.__obs_like_estimator = nn.Sequential(
-                nn.Linear(128 + 3, 128),
+                nn.Linear(64 + self.__state_dim, 64),
                 nn.ReLU(),
-                nn.Linear(128, 128),
+                nn.Linear(64, 64),
                 nn.ReLU(),
-                nn.Linear(128, 1),
+                nn.Linear(64, 1),
                 nn.Softmax(dim=0)
         ).to(device)
 
@@ -442,8 +445,8 @@ class DMCL():
     def __compute_motion_loss(self):
         """
         """
-        gt_pose = self.get_gt_pose(to_tensor = True)
-        sq_dist = torch.sqrt(utils.compute_sq_distance(self.__particles, gt_pose))
+        gt_pose = self.get_gt_pose(to_tensor = True).repeat(self.__num_particles, 1)
+        sq_dist = torch.log(utils.compute_sq_distance(self.__particles, gt_pose))
         std = 0.5
         mvn_pdf = (1/self.__num_particles) * (1/np.sqrt(2 * np.pi * std**2)) \
                         * torch.exp(-sq_dist / (2. * std**2))
@@ -631,7 +634,8 @@ class DMCL():
                 self.__writer.add_scalars('eval', {
                                             'dist_error': sqr_dist_error
                                         }, eval_idx)
-                if sqr_dist_error < curr_acc:
+                if sqr_dist_error < eval_acc:
+                    eval_acc = sqr_dist_error
                     file_path = 'best_models/model.pt'.format(train_idx)
                     self.__save_model(file_path)
             else:
@@ -667,7 +671,7 @@ class DMCL():
                     self.__update_figures()
 
                     # log stats
-                    if train_idx%50 == 0:
+                    if train_idx%25 == 0:
                         print('Motion Loss: {0}, Measurement Loss: {1}'\
                             .format(motion_loss.item(), measurement_loss.item()))
 
@@ -678,10 +682,11 @@ class DMCL():
                                 'measurement_loss': measurement_loss.item()
                             }, train_idx)
 
-                    if train_idx%10 == 0:
+                    if curr_epoch%10 == 0:
                         file_path = 'saved_models/model_train_idx{}.pt'.format(train_idx)
                         self.__save_model(file_path)
                         print('training model is saved')
+
                 sqr_dist_error = np.sqrt(utils.compute_sq_distance(
                                                 self.get_est_pose(),
                                                 self.get_gt_pose()
