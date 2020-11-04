@@ -2,6 +2,7 @@
 
 import numpy as np
 import torch
+from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
 import utils
 import matplotlib.pyplot as plt
@@ -13,6 +14,7 @@ from gibson2.envs.locomotor_env import NavigateEnv, NavigateRandomEnv
 from transforms3d.euler import quat2euler
 import os
 import cv2
+from pathlib import Path
 
 if torch.cuda.is_available():
     device = torch.device('cuda')
@@ -53,6 +55,11 @@ class DMCL():
         self.__configure_env(env_config_file)
         self.__build_modules()
 
+        self.__writer = SummaryWriter()
+
+        Path("saved_models").mkdir(parents=True, exist_ok=True)
+        Path("best_models").mkdir(parents=True, exist_ok=True)
+
     def __configure_env(self, env_config_file: str):
         """
         """
@@ -88,10 +95,10 @@ class DMCL():
             nn.Linear(128, 128),
             nn.ReLU(),
             nn.Linear(128, self.__state_dim),
-        )
+        ).to(device)
 
         #
-        N, C, H, W = 1, 3, 240, 320 # refer turtlebot.yaml of rgb specs
+        N, C, H, W = 1, 3, 120, 160 # refer turtlebot.yaml of rgb specs
         conv_config = np.array([
             [3, 48, 7, 3, 5],
             [48, 128, 7, 3, 5],
@@ -177,6 +184,7 @@ class DMCL():
         #action_input = torch.from_numpy(action_input).float().to(device)
 
         actions = torch.from_numpy(actions).float().to(device)
+        actions = actions.unsqueeze(0)
         action_input = actions.repeat(self.__num_particles, 1)
         random_input = torch.normal(mean=0.0, std=1.0, size=action_input.shape).to(device)
         input = torch.cat([action_input, random_input], axis=-1)
@@ -187,23 +195,39 @@ class DMCL():
         # add zero-mean action noise to original actions
         delta = delta - torch.mean(delta, 1, True)
 
-        # reference: probabilistic robotics: 'algorithm sample_motion_model_velocity()'
-        # move the particles using noisy actions
-        x = particles[:, 0:1]
-        y = particles[:, 1:2]
-        theta = particles[:, 2:3]
+        use_odom_model = True
+        if use_odom_model:
+            delta = delta.detach()  # this is necessary for gradient flow
+            noisy_actions = torch.cat([
+                delta[:, 0:1] + action_input[:, 0:1],
+                delta[:, 1:2] + action_input[:, 1:2],
+                #delta[:, 2:3]
+            ], axis=-1)
 
-        noisy_v = delta[:, 0:1] + action_input[:, 0:1]
-        noisy_w = delta[:, 1:2] + action_input[:, 1:2]
-        noisy_r = delta[:, 2:3]
-        radius = (noisy_v/noisy_w)
-        delta_t = 1 # 1sec
+            state_input = torch.cat([particles, noisy_actions], axis=-1)
+            state_delta = self.__transition_model(state_input)
+            new_states = [particles[:, i:i+1] + state_delta[:, i:i+1] for i in range(3)]
 
-        new_x = x - radius*torch.sin(theta) + radius*torch.sin(theta + noisy_w*delta_t)
-        new_y = y + radius*torch.cos(theta) - radius*torch.cos(theta + noisy_w*delta_t)
-        new_theta = utils.wrap_angle(theta + noisy_w*delta_t + noisy_r*delta_t)
+            moved_particles = torch.cat(new_states, axis=-1)
+            moved_particles[:, 2:3] = utils.wrap_angle(moved_particles[:, 2:3])
+        else:
+            # reference: probabilistic robotics: 'algorithm sample_motion_model_velocity()'
+            # move the particles using noisy actions
+            x = particles[:, 0:1]
+            y = particles[:, 1:2]
+            theta = particles[:, 2:3]
 
-        moved_particles = torch.cat([new_x, new_y, new_theta], axis=-1)
+            noisy_v = delta[:, 0:1] + action_input[:, 0:1]
+            noisy_w = delta[:, 1:2] + action_input[:, 1:2]
+            noisy_r = delta[:, 2:3]
+            radius = (noisy_v/noisy_w)
+            delta_t = 1 # 1sec
+
+            new_x = x - radius*torch.sin(theta) + radius*torch.sin(theta + noisy_w*delta_t)
+            new_y = y + radius*torch.cos(theta) - radius*torch.cos(theta + noisy_w*delta_t)
+            new_theta = utils.wrap_angle(theta + noisy_w*delta_t + noisy_r*delta_t)
+
+            moved_particles = torch.cat([new_x, new_y, new_theta], axis=-1)
 
         return moved_particles
 
@@ -419,10 +443,10 @@ class DMCL():
         """
         """
         gt_pose = self.get_gt_pose(to_tensor = True)
-        sq_dist = utils.compute_sq_distance(self.__particles, gt_pose)
-        std = 0.01
+        sq_dist = torch.sqrt(utils.compute_sq_distance(self.__particles, gt_pose))
+        std = 0.5
         mvn_pdf = (1/self.__num_particles) * (1/np.sqrt(2 * np.pi * std**2)) \
-                        * torch.exp(-sq_dist / (2 * np.pi * std**2))
+                        * torch.exp(-sq_dist / (2. * std**2))
         loss = torch.mean(-torch.log(1e-16 + mvn_pdf), axis=0)
 
         return loss
@@ -497,6 +521,44 @@ class DMCL():
                     Line2D([0], [0], color="k", lw=4)],
                    ['max-gradient', 'mean-gradient', 'zero-gradient'])
 
+    def __save_model(self, file_path):
+        """
+        """
+        torch.save({
+            '__noise_generator': self.__noise_generator.state_dict(),
+            '__transition_model': self.__transition_model.state_dict(),
+            '__encoder': self.__encoder.state_dict(),
+            '__obs_like_estimator': self.__obs_like_estimator.state_dict(),
+            '__motion_optim': self.__motion_optim.state_dict(),
+            '__measurement_optim': self.__measurement_optim.state_dict(),
+        }, file_path)
+
+    def __load_model(self, file_path):
+        """
+        """
+        checkpoint = torch.load(file_path)
+        self.__noise_generator.load_state_dict([checkpoint['__noise_generator']])
+        self.__transition_model.load_state_dict([checkpoint['__transition_model']])
+        self.__encoder.load_state_dict([checkpoint['__encoder']])
+        self.__obs_like_estimator.load_state_dict([checkpoint['__obs_like_estimator']])
+        self.__motion_optim.load_state_dict([checkpoint['__motion_optim']])
+        self.__measurement_optim.load_state_dict([checkpoint['__measurement_optim']])
+
+    def __set_train_mode(self):
+        """
+        """
+        self.__noise_generator.train()
+        self.__transition_model.train()
+        self.__encoder.train()
+        self.__obs_like_estimator.train()
+
+    def __set_eval_mode(self):
+        """
+        """
+        self.__noise_generator.eval()
+        self.__transition_model.eval()
+        self.__encoder.eval()
+        self.__obs_like_estimator.eval()
 
     #############################
     ##### PUBLIC METHODS
@@ -526,10 +588,15 @@ class DMCL():
         return pose
 
     def train(self):
-        num_epochs = 10
-        epoch_len = 20
+        num_epochs = 100
+        epoch_len = 50
+        eval_epoch = 10
 
         curr_epoch = 0
+        train_idx = 0
+        eval_idx = 0
+
+        eval_acc = np.inf
         while curr_epoch < num_epochs:
             curr_epoch += 1
             obs = self.__env.reset()
@@ -538,35 +605,89 @@ class DMCL():
             self.__init_particles(gt_pose)
             self.__update_figures()
 
-            for curr_step in range(epoch_len):
+            if curr_epoch%eval_epoch == 0:
+                self.__set_eval_mode()
+                with torch.no_grad():
+                    for curr_step in range(epoch_len):
+                        eval_idx = eval_idx + 1
+                        # take the action in environment
+                        action = self.__env.action_space.sample() # will be changed to rl action
+                        obs, reward, done, info = self.__env.step(action)
 
-                # take the action in environment
-                action = self.__env.action_space.sample() # will be changed to rl action
-                obs, reward, done, info = self.__env.step(action)
+                        ##### motion update #####
+                        self.__particles = self.__motion_update(action, self.__particles)
 
-                ##### motion update #####
-                self.__particles = self.__motion_update(action, self.__particles)
-                motion_loss = self.__compute_motion_loss()
-                self.__motion_optim.zero_grad()
+                        ##### measurement update #####
+                        self.__particles_probs *= self.__measurement_update(obs, self.__particles)
+                        self.__particles_probs /= torch.sum(self.__particles_probs, axis=0) # normalize probabilities
 
-                ##### measurement update #####
-                self.__particles_probs *= self.__measurement_update(obs, self.__particles)
-                self.__particles_probs /= torch.sum(self.__particles_probs, axis=0) # normalize probabilities
-                measurement_loss = self.__compute_measurement_loss()
-                self.__measurement_optim.zero_grad()
+                        ##### resample particles #####
+                        self.__particles = self.__resample_particles(self.__particles, self.__particles_probs)
 
-                ##### resample particles #####
-                self.__particles = self.__resample_particles(self.__particles, self.__particles_probs)
+                sqr_dist_error = np.sqrt(utils.compute_sq_distance(
+                                                self.get_est_pose(),
+                                                self.get_gt_pose()
+                                        ) )
+                self.__writer.add_scalars('eval', {
+                                            'dist_error': sqr_dist_error
+                                        }, eval_idx)
+                if sqr_dist_error < curr_acc:
+                    file_path = 'best_models/model.pt'.format(train_idx)
+                    self.__save_model(file_path)
+            else:
+                self.__set_train_mode()
+                for curr_step in range(epoch_len):
+                    train_idx = train_idx + 1
+                    # take the action in environment
+                    action = self.__env.action_space.sample() # will be changed to rl action
+                    obs, reward, done, info = self.__env.step(action)
 
-                motion_loss.backward(retain_graph=True)
-                #self.___plot_grad_flow(self.__noise_generator.named_parameters())
-                measurement_loss.backward(retain_graph=True)
-                #self.___plot_grad_flow(self.__encoder.named_parameters())
+                    ##### motion update #####
+                    self.__particles = self.__motion_update(action, self.__particles)
+                    motion_loss = self.__compute_motion_loss()
+                    self.__motion_optim.zero_grad()
 
-                self.__motion_optim.step()
-                self.__measurement_optim.step()
+                    ##### measurement update #####
+                    self.__particles_probs *= self.__measurement_update(obs, self.__particles)
+                    self.__particles_probs /= torch.sum(self.__particles_probs, axis=0) # normalize probabilities
+                    measurement_loss = self.__compute_measurement_loss()
+                    self.__measurement_optim.zero_grad()
 
-                self.__update_figures()
+                    ##### resample particles #####
+                    self.__particles = self.__resample_particles(self.__particles, self.__particles_probs)
 
-                print('Motion Loss: {0}, Measurement Loss: {1}'\
-                                .format(motion_loss.item(), measurement_loss.item()))
+                    motion_loss.backward(retain_graph=True)
+                    #self.___plot_grad_flow(self.__transition_model.named_parameters())
+                    measurement_loss.backward(retain_graph=True)
+                    #self.___plot_grad_flow(self.__obs_like_estimator.named_parameters())
+
+                    self.__motion_optim.step()
+                    self.__measurement_optim.step()
+
+                    self.__update_figures()
+
+                    # log stats
+                    if train_idx%50 == 0:
+                        print('Motion Loss: {0}, Measurement Loss: {1}'\
+                            .format(motion_loss.item(), measurement_loss.item()))
+
+                    self.__writer.add_scalars('train', {
+                                'motion_loss': motion_loss.item()
+                            }, train_idx)
+                    self.__writer.add_scalars('train', {
+                                'measurement_loss': measurement_loss.item()
+                            }, train_idx)
+
+                    if train_idx%10 == 0:
+                        file_path = 'saved_models/model_train_idx{}.pt'.format(train_idx)
+                        self.__save_model(file_path)
+                        print('training model is saved')
+                sqr_dist_error = np.sqrt(utils.compute_sq_distance(
+                                                self.get_est_pose(),
+                                                self.get_gt_pose()
+                                        ) )
+                self.__writer.add_scalars('train', {
+                            'dist_error': sqr_dist_error
+                        }, train_idx)
+        self.__writer.close()
+        print('training done')
