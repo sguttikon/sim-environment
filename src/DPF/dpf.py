@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import utils
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 from matplotlib.patches import Wedge
 from gibson2.utils.utils import parse_config
 from gibson2.utils.assets_utils import get_model_path
@@ -78,6 +79,16 @@ class DMCL():
                 nn.Linear(32, self.__state_dim),
                 nn.ReLU(),
         ).to(device)
+
+        self.__transition_model = nn.Sequential(
+            nn.Linear(self.__state_dim + self.__action_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, self.__state_dim),
+        )
 
         #
         N, C, H, W = 1, 3, 240, 320 # refer turtlebot.yaml of rgb specs
@@ -174,7 +185,7 @@ class DMCL():
         delta = self.__noise_generator(input)
 
         # add zero-mean action noise to original actions
-        delta -= torch.mean(delta, 1, True)
+        delta = delta - torch.mean(delta, 1, True)
 
         # reference: probabilistic robotics: 'algorithm sample_motion_model_velocity()'
         # move the particles using noisy actions
@@ -230,19 +241,22 @@ class DMCL():
         low = 0.0
         step = 1./self.__num_particles
         rnd_offset = ((low - step) * torch.rand(1) + step).to(device)    # uniform random [0, step]
-        cum_prob = particle_probs[0]
-        i = 0
+        markers = torch.linspace(rnd_offset.item(), 1.0, self.__num_particles).to(device)
+        cum_probs = torch.cumsum(particle_probs, axis=0)
 
+        i = j = 0
         new_particles = []
         for idx in range(self.__num_particles):
-            while rnd_offset > cum_prob:
-                i += 1
-                cum_prob += particle_probs[i]
+            while j<self.__num_particles and markers[i] > cum_probs[j]:
+                j = j+1
 
-            new_particles.append(particles[i]) # add the particle
-            rnd_offset += step
+            if j == self.__num_particles: # border case
+                j = j-1
 
+            new_particles.append(particles[j]) # add the particle
+            i = i+1
         new_particles = torch.stack(new_particles, axis=0)
+
         return new_particles
 
     def __particles_to_state(self, particles:torch.Tensor, particle_probs:torch.Tensor) -> torch.Tensor:
@@ -451,6 +465,39 @@ class DMCL():
         loss = - (temperature/base_temperature) * mean_log_prob_pos
         return loss.mean()
 
+    def ___plot_grad_flow(self, named_parameters):
+        """
+        plots the gradients flowing through different layers in the network during training.
+
+        usage: plug this function in training class after loss.backwards as
+               '___plot_grad_flow(self.model.named_parameters())' to visualize
+        """
+        # reference https://discuss.pytorch.org/t/check-gradient-flow-in-network/15063/10
+
+        ave_grads = []
+        max_grads= []
+        layers = []
+        for n, p in named_parameters:
+            if(p.requires_grad) and ("bias" not in n):
+                layers.append(n)
+                ave_grads.append(p.grad.abs().mean())
+                max_grads.append(p.grad.abs().max())
+        plt.bar(np.arange(len(max_grads)), max_grads, alpha=0.1, lw=1, color="c")
+        plt.bar(np.arange(len(max_grads)), ave_grads, alpha=0.1, lw=1, color="b")
+        plt.hlines(0, 0, len(ave_grads)+1, lw=2, color="k" )
+        plt.xticks(range(0,len(ave_grads), 1), layers, rotation="vertical")
+        plt.xlim(left=0, right=len(ave_grads))
+        plt.ylim(bottom = -0.001, top=0.02) # zoom in on the lower gradient regions
+        plt.xlabel("Layers")
+        plt.ylabel("average gradient")
+        plt.title("Gradient flow")
+        plt.grid(True)
+        plt.legend([Line2D([0], [0], color="c", lw=4),
+                    Line2D([0], [0], color="b", lw=4),
+                    Line2D([0], [0], color="k", lw=4)],
+                   ['max-gradient', 'mean-gradient', 'zero-gradient'])
+
+
     #############################
     ##### PUBLIC METHODS
     #############################
@@ -512,7 +559,9 @@ class DMCL():
                 self.__particles = self.__resample_particles(self.__particles, self.__particles_probs)
 
                 motion_loss.backward(retain_graph=True)
+                #self.___plot_grad_flow(self.__noise_generator.named_parameters())
                 measurement_loss.backward(retain_graph=True)
+                #self.___plot_grad_flow(self.__encoder.named_parameters())
 
                 self.__motion_optim.step()
                 self.__measurement_optim.step()
@@ -520,4 +569,4 @@ class DMCL():
                 self.__update_figures()
 
                 print('Motion Loss: {0}, Measurement Loss: {1}'\
-                                .format(motion_loss, measurement_loss))
+                                .format(motion_loss.item(), measurement_loss.item()))
