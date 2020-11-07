@@ -198,7 +198,7 @@ class DMCL():
         # add zero-mean action noise to original actions
         delta = delta - torch.mean(delta, 1, True)
 
-        use_odom_model = True
+        use_odom_model = False
         if use_odom_model:
             delta = delta.detach()  # this is necessary for gradient flow
             noisy_actions = torch.cat([
@@ -445,7 +445,7 @@ class DMCL():
     def __compute_motion_loss(self):
         """
         """
-        gt_pose = self.get_gt_pose(to_tensor = True).repeat(self.__num_particles, 1)
+        gt_pose = self.get_gt_pose(to_tensor = True)#.repeat(self.__num_particles, 1)
         sq_dist = torch.log(utils.compute_sq_distance(self.__particles, gt_pose))
         std = 0.5
         mvn_pdf = (1/self.__num_particles) * (1/np.sqrt(2 * np.pi * std**2)) \
@@ -461,7 +461,7 @@ class DMCL():
         # reference https://github.com/wangz10/contrastive_loss/blob/master/losses.py#L104
         # and https://github.com/HobbitLong/SupContrast/blob/master/losses.py
 
-        gt_pose = self.get_gt_pose(to_tensor = True).repeat(self.__num_particles, 1)
+        gt_pose = self.get_gt_pose(to_tensor = True)#.repeat(self.__num_particles, 1)
         features = torch.log(utils.compute_sq_distance(self.__particles, gt_pose)).unsqueeze(1)
         labels = torch.zeros([self.__num_particles, 1]).to(device)
 
@@ -659,9 +659,6 @@ class DMCL():
                     measurement_loss = self.__compute_measurement_loss()
                     self.__measurement_optim.zero_grad()
 
-                    ##### resample particles #####
-                    self.__particles = self.__resample_particles(self.__particles, self.__particles_probs)
-
                     motion_loss.backward(retain_graph=True)
                     #self.___plot_grad_flow(self.__transition_model.named_parameters())
                     measurement_loss.backward(retain_graph=True)
@@ -669,6 +666,9 @@ class DMCL():
 
                     self.__motion_optim.step()
                     self.__measurement_optim.step()
+
+                    ##### resample particles #####
+                    self.__particles = self.__resample_particles(self.__particles.detach(), self.__particles_probs.detach())
 
                     self.__update_figures()
 
@@ -684,9 +684,9 @@ class DMCL():
                                 'measurement_loss': measurement_loss.item()
                             }, train_idx)
 
-                    if curr_epoch%10 == 0:
-                        file_path = 'saved_models/model_train_idx{}.pt'.format(train_idx)
-                        self.__save_model(file_path)
+                if curr_epoch%15 == 0:
+                    file_path = 'saved_models/model_train_idx{}.pt'.format(train_idx)
+                    self.__save_model(file_path)
 
                 sqr_dist_error = np.sqrt(utils.compute_sq_distance(
                                                 self.get_est_pose(),
