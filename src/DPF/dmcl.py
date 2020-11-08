@@ -38,7 +38,7 @@ class DMCL():
         self.likelihood_net.train()
         self.particles_net.train()
 
-    def eval_model(self):
+    def eval_mode(self):
         self.odom_net.eval()
         self.vision_net.eval()
         self.likelihood_net.eval()
@@ -77,7 +77,7 @@ class DMCL():
             pose[0:2], torch.cos(pose[2:3]), torch.sin(pose[2:3])
         ], axis=-1)
 
-    def step(self, imgs, acts, particles):
+    def step(self, imgs, acts, particles, std = 0.75):
         """
         """
         self.train_mode()
@@ -95,17 +95,26 @@ class DMCL():
         input_features = torch.cat([trans_particles, \
                         encoded_imgs.repeat(particles.shape[0], 1)], axis=-1)
         obs_likelihoods = self.likelihood_net(input_features).squeeze(1)
-
-        # --------- Loss ----------- #
         #particles_probs = particles_probs * obs_likelihoods
         #particles_probs = torch.div(particles_probs, torch.sum(particles_probs))
         particles_probs = torch.div(obs_likelihoods, torch.sum(obs_likelihoods))
 
-        mean_particles = torch.sum(trans_particles*particles_probs.unsqueeze(1), axis=0)
-        gt_pose = self.transform_pose(self.to_tensor(helpers.get_gt_pose(self.robot)))
-        sq_dist = helpers.eucld_dist(gt_pose, mean_particles)
+        # --------- Loss ----------- #
 
-        total_loss = sq_dist
+        # to optimize
+        gt_pose = self.transform_pose(self.to_tensor(helpers.get_gt_pose(self.robot)))
+        sqrt_dist = helpers.eucld_dist(gt_pose, trans_particles)
+
+        gaussian_pdf = particles_probs * (1/np.sqrt(2 * np.pi * std**2)) * \
+                        torch.exp(-.5 * (sqrt_dist/std)**2 )
+
+        loss = torch.mean(-torch.log(1e-8 + gaussian_pdf))
+
+        # to monitor: calculate mix of gaussians
+        mean_particles = torch.sum(trans_particles*particles_probs.unsqueeze(1), axis=0)
+        mse = helpers.eucld_dist(gt_pose, mean_particles)
+
+        total_loss = loss
 
         # --------- Backward Pass --------- #
         self.optimizer.zero_grad()
@@ -117,4 +126,53 @@ class DMCL():
 
         particles = particles.detach() # stop gradient flow here
 
-        return particles, total_loss, 0.
+        return particles, total_loss, mse
+
+    def predict(self, imgs, acts, particles):
+        """
+        """
+        self.eval_mode()
+
+        with torch.no_grad():
+
+            # --------- Odometry Network --------- #
+            #acts  = self.to_tensor(acts)
+            particles = self.odom_net(particles, acts)
+
+            # --------- Vision Network --------------- #
+            imgs = self.to_tensor(imgs).unsqueeze(0).permute(0, 3, 1, 2) # from NHWC to NCHW
+            encoded_imgs = self.vision_net(imgs)
+
+            # --------- Observation Likelihood ------- #
+            trans_particles = self.transform_particles(particles)
+            input_features = torch.cat([trans_particles, \
+                            encoded_imgs.repeat(particles.shape[0], 1)], axis=-1)
+            obs_likelihoods = self.likelihood_net(input_features).squeeze(1)
+            particles_probs = torch.div(obs_likelihoods, torch.sum(obs_likelihoods))
+
+            # to monitor: calculate mix of gaussians
+            gt_pose = self.transform_pose(self.to_tensor(helpers.get_gt_pose(self.robot)))
+            mean_particles = torch.sum(trans_particles*particles_probs.unsqueeze(1), axis=0)
+            mse = helpers.eucld_dist(gt_pose, mean_particles)
+
+            # --------- Particle Network -------- #
+            particles = self.particles_net(particles, particles_probs)
+
+        return particles, mse
+
+    def save(self, file_name):
+        torch.save({
+            #'odom_net': self.odom_net.state_dict(),
+            'vision_net': self.vision_net.state_dict(),
+            'likelihood_net': self.likelihood_net.state_dict(),
+            #'particles_net': self.particles_net.state_dict(),
+        }, file_name)
+        #print('=> created checkpoint')
+
+    def load(self, file_name):
+        checkpoint = torch.load(file_name)
+        #self.odom_net.load_state_dict(checkpoint['odom_net'])
+        self.vision_net.load_state_dict(checkpoint['vision_net'])
+        self.likelihood_net.load_state_dict(checkpoint['likelihood_net'])
+        #self.particles_net.load_state_dict(checkpoint['particles_net'])
+        print('=> loaded checkpoint')

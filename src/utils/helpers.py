@@ -24,4 +24,8 @@ def wrap_angle(angle):
 def eucld_dist(pose1, pose2):
     """
     """
-    return torch.norm(pose1-pose2)
+    diff = pose1-pose2
+    if len(diff.shape) == 1:
+        return torch.norm(diff)
+    else:
+        return torch.norm(diff, dim=1)

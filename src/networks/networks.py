@@ -127,7 +127,7 @@ class ParticlesNetwork(nn.Module):
         i = 0
         new_particles = []
         for particle in particles:
-            while rnd_offset > cum_sum:
+            while i<particles.shape[0] and rnd_offset > cum_sum:
                 i = i + 1
                 cum_sum = cum_sum + particles_probs[i]
             new_particles.append(particles[i])
