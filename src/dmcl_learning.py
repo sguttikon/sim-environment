@@ -88,6 +88,6 @@ for curr_epoch in range(num_epochs):
             acc = mean_acc
             file_path = 'best_models/model.pt'
             dmcl.save(file_path)
-            print('=> best accuracy: {0}'.format()acc)
+            print('=> best accuracy: {0}'.format(acc))
 
 writer.close()
