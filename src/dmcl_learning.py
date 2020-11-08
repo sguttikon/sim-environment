@@ -39,8 +39,8 @@ robot = env.robots[0]
 dmcl = DMCL(robot)
 writer = SummaryWriter()
 
-num_epochs = 20
-epoch_len = 10
+num_epochs = 2000
+epoch_len = 50
 train_idx = 0
 eval_idx = 0
 acc = np.inf
@@ -85,8 +85,9 @@ for curr_epoch in range(num_epochs):
 
         mean_acc = total_err / epoch_len
         if mean_acc < acc:
-            mean_acc = acc
+            acc = mean_acc
             file_path = 'best_models/model.pt'
             dmcl.save(file_path)
+            print('=> best accuracy: {0}'.format()acc)
 
 writer.close()
