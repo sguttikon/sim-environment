@@ -32,9 +32,11 @@ class DMCL():
         self.vision_net = nets.VisionNetwork().to(constants.DEVICE)
         self.likelihood_net = nets.LikelihoodNetwork().to(constants.DEVICE)
         self.particles_net = nets.ParticlesNetwork().to(constants.DEVICE)
+        self.action_net = nets.ActionNetwork().to(constants.DEVICE)
 
         params = list(self.vision_net.parameters()) + \
-                 list(self.likelihood_net.parameters())
+                 list(self.likelihood_net.parameters()) + \
+                 list(self.action_net.parameters())
                  # TODO add odom net parameters for optimization
         self.optimizer = torch.optim.Adam(params, lr=2e-4)
         self.env = NavigateRandomEnv(config_file = config_filename,
@@ -73,12 +75,14 @@ class DMCL():
         self.vision_net.train()
         self.likelihood_net.train()
         self.particles_net.train()
+        self.action_net.train()
 
     def eval_mode(self):
         self.odom_net.eval()
         self.vision_net.eval()
         self.likelihood_net.eval()
         self.particles_net.eval()
+        self.action_net.eval()
 
     def to_tensor(self, array):
         return torch.from_numpy(array.copy()).float().to(constants.DEVICE)
@@ -86,11 +90,13 @@ class DMCL():
     def to_numpy(self, tensor):
         return tensor.cpu().detach().numpy()
 
-    def init_particles(self, init_pose):
+    def init_particles(self):
         """
         """
+        self.curr_obs = self.env.reset()
 
-        limits = 100
+        init_pose = helpers.get_gt_pose(self.robot)
+        limits = 200
         bounds = np.array([
             [init_pose[0] - limits, init_pose[0] + limits],
             [init_pose[1] - limits, init_pose[1] + limits],
@@ -124,19 +130,25 @@ class DMCL():
         """
         self.train_mode()
 
-        # --------- RL Agent Network --------- #
-        # TODO: get action from trained agent
-        acts = self.env.action_space.sample() * 1.5
+        # --------- Vision Network --------------- #
+        imgs = self.curr_obs['rgb']
+        imgs = self.to_tensor(imgs).unsqueeze(0).permute(0, 3, 1, 2) # from NHWC to NCHW
+        encoded_imgs = self.vision_net(imgs)
+
+        # --------- Agent Network --------- #
+        agent = 'TRAIN'
+        if agent == 'RANDOM':
+            acts = self.env.action_space.sample() * 2
+        elif agent == 'TRAIN':
+            acts = self.to_numpy(self.action_net(encoded_imgs))[0]
+
+        # take action in environment
         obs, reward, done, info = self.env.step(acts)
-        imgs = obs['rgb']
+        self.curr_obs = obs
 
         # --------- Odometry Network --------- #
         #acts  = self.to_tensor(acts)
         particles = self.odom_net(particles, acts)
-
-        # --------- Vision Network --------------- #
-        imgs = self.to_tensor(imgs).unsqueeze(0).permute(0, 3, 1, 2) # from NHWC to NCHW
-        encoded_imgs = self.vision_net(imgs)
 
         # --------- Observation Likelihood ------- #
         trans_particles = self.transform_particles(particles)
@@ -183,19 +195,25 @@ class DMCL():
 
         with torch.no_grad():
 
-            # --------- RL Agent Network --------- #
-            # TODO: get action from trained agent
-            acts = self.env.action_space.sample() * 1.5
+            # --------- Vision Network --------------- #
+            imgs = self.curr_obs['rgb']
+            imgs = self.to_tensor(imgs).unsqueeze(0).permute(0, 3, 1, 2) # from NHWC to NCHW
+            encoded_imgs = self.vision_net(imgs)
+
+            # --------- Agent Network --------- #
+            agent = 'TRAIN'
+            if agent == 'RANDOM':
+                acts = self.env.action_space.sample() * 2
+            elif agent == 'TRAIN':
+                acts = self.to_numpy(self.action_net(encoded_imgs))[0]
+
+            # take action in environment
             obs, reward, done, info = self.env.step(acts)
-            imgs = obs['rgb']
+            self.curr_obs = obs
 
             # --------- Odometry Network --------- #
             #acts  = self.to_tensor(acts)
             particles = self.odom_net(particles, acts)
-
-            # --------- Vision Network --------------- #
-            imgs = self.to_tensor(imgs).unsqueeze(0).permute(0, 3, 1, 2) # from NHWC to NCHW
-            encoded_imgs = self.vision_net(imgs)
 
             # --------- Observation Likelihood ------- #
             trans_particles = self.transform_particles(particles)
@@ -212,6 +230,8 @@ class DMCL():
             # --------- Particle Network -------- #
             particles = self.particles_net(particles, particles_probs)
 
+            self.particles = particles
+            self.update_figures()
         return particles, mse
 
     def update_figures(self):
@@ -220,7 +240,9 @@ class DMCL():
             self.plots['robot_gt']['pose'], self.plots['robot_gt']['heading'] = \
                 self.plot_robot_gt(self.plots['robot_gt']['pose'],
                                    self.plots['robot_gt']['heading'], 'navy')
-
+            self.plots['robot_est']['pose'], self.plots['robot_est']['heading'] = \
+                self.plot_robot_est(self.plots['robot_est']['pose'],
+                                    self.plots['robot_est']['heading'], 'maroon')
             self.plots['robot_est']['particles'] = \
                 self.plot_particles(self.plots['robot_est']['particles'], 'coral')
 
@@ -267,6 +289,11 @@ class DMCL():
         gt_pose = helpers.get_gt_pose(self.robot)
         return self.plot_robot(gt_pose, pose_plt, heading_plt, color)
 
+    def plot_robot_est(self, pose_plt, heading_plt, color):
+        est_pose = self.to_numpy(torch.mean(self.particles, axis=0))
+        est_pose[2] = helpers.wrap_angle(est_pose[2])
+        return self.plot_robot(est_pose, pose_plt, heading_plt, color)
+
     def plot_robot(self, robot_pose, pose_plt, heading_plt, color):
         pos_x, pos_y, heading = robot_pose
 
@@ -299,6 +326,7 @@ class DMCL():
             #'odom_net': self.odom_net.state_dict(),
             'vision_net': self.vision_net.state_dict(),
             'likelihood_net': self.likelihood_net.state_dict(),
+            'action_net': self.action_net.state_dict(),
             #'particles_net': self.particles_net.state_dict(),
         }, file_name)
         #print('=> created checkpoint')
@@ -308,5 +336,6 @@ class DMCL():
         #self.odom_net.load_state_dict(checkpoint['odom_net'])
         self.vision_net.load_state_dict(checkpoint['vision_net'])
         self.likelihood_net.load_state_dict(checkpoint['likelihood_net'])
+        self.action_net.load_state_dict(checkpoint['action_net'])
         #self.particles_net.load_state_dict(checkpoint['particles_net'])
         print('=> loaded checkpoint')

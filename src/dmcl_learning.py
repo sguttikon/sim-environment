@@ -22,6 +22,7 @@ import utils.helpers as helpers
 from torch.utils.tensorboard import SummaryWriter
 from pathlib import Path
 import numpy as np
+import torch
 
 def train():
     curr_dir_path = os.path.dirname(os.path.abspath(__file__))
@@ -32,15 +33,13 @@ def train():
     dmcl = DMCL(config_filename)
     writer = SummaryWriter()
 
-    num_epochs = 2000
-    epoch_len = 50
+    num_epochs = 500
+    epoch_len = 100
     train_idx = 0
     eval_idx = 0
     acc = np.inf
     for curr_epoch in range(num_epochs):
-        obs = dmcl.env.reset()
-        gt_pose = helpers.get_gt_pose(dmcl.robot)
-        particles, particles_probs = dmcl.init_particles(gt_pose)
+        particles, particles_probs = dmcl.init_particles()
         cum_loss = 0.
         cum_acc = 0.
         for curr_step in range(epoch_len):
@@ -61,9 +60,7 @@ def train():
             file_path = 'saved_models/train_model_{}.pt'.format(curr_epoch)
             dmcl.save(file_path)
 
-            obs = dmcl.env.reset()
-            gt_pose = helpers.get_gt_pose(dmcl.robot)
-            particles, particles_probs = dmcl.init_particles(gt_pose)
+            particles, particles_probs = dmcl.init_particles()
             cum_acc = 0.
             for curr_step in range(epoch_len):
                 eval_idx = eval_idx + 1
@@ -87,9 +84,13 @@ def test():
     config_filename = os.path.join(curr_dir_path, 'config/turtlebot.yaml')
     dmcl = DMCL(config_filename, render=True)
 
-    obs = dmcl.env.reset()
-    gt_pose = helpers.get_gt_pose(dmcl.robot)
-    particles, particles_probs = dmcl.init_particles(gt_pose)
+    file_path = 'best_models/model.pt'
+    dmcl.load(file_path)
+
+    epoch_len = 1
+    particles, particles_probs = dmcl.init_particles()
+    for curr_step in range(epoch_len):
+        particles, mse = dmcl.predict(particles)
 
 if __name__ == '__main__':
     train()

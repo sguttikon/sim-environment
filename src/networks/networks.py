@@ -54,6 +54,7 @@ class LikelihoodNetwork(nn.Module):
         super(LikelihoodNetwork, self).__init__()
         self.in_features = constants.VISUAL_FEATURES + 4
 
+        # model
         self.fc_model = nn.Sequential(
             nn.Linear(in_features=self.in_features, out_features=128), # shape: [N, 67]
             nn.ReLU(),
@@ -134,3 +135,23 @@ class ParticlesNetwork(nn.Module):
             rnd_offset = rnd_offset + step
         particles = torch.stack(new_particles, axis=0)
         return particles
+
+class ActionNetwork(nn.Module):
+    """
+    """
+
+    def __init__(self):
+        super(ActionNetwork, self).__init__()
+
+        # model
+        self.fc_model = nn.Sequential(
+            nn.Linear(in_features=constants.VISUAL_FEATURES, out_features=128), # shape: [N, 64]
+            nn.ReLU(),
+            nn.Linear(in_features=128, out_features=128), # shape: [N, 128]
+            nn.ReLU(),
+            nn.Linear(in_features=128, out_features=constants.ACTION_DIMS), # shape: [N, 128]
+        )
+
+    def forward(self, x):
+        x = self.fc_model(x)
+        return x # shape: [N, 2]
