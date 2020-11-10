@@ -6,6 +6,13 @@ import utils.constants as constants
 import networks.networks as nets
 import utils.helpers as helpers
 import random
+import matplotlib.pyplot as plt
+from matplotlib.patches import Wedge
+from gibson2.envs.locomotor_env import NavigateRandomEnv
+from gibson2.utils.utils import parse_config
+from gibson2.utils.assets_utils import get_model_path
+import os
+import cv2
 
 np.random.seed(42)
 random.seed(42)
@@ -18,7 +25,7 @@ class DMCL():
     """
     """
 
-    def __init__(self, robot):
+    def __init__(self, config_filename, render=False):
         super(DMCL, self).__init__()
 
         self.odom_net = nets.OdomNetwork().to(constants.DEVICE)
@@ -30,7 +37,36 @@ class DMCL():
                  list(self.likelihood_net.parameters())
                  # TODO add odom net parameters for optimization
         self.optimizer = torch.optim.Adam(params, lr=2e-4)
-        self.robot = robot
+        self.env = NavigateRandomEnv(config_file = config_filename,
+                    mode = 'headless',  # ['headless', 'gui']
+        )
+        self.config_data = parse_config(config_filename)
+        self.robot = self.env.robots[0]
+
+        self.render = render
+        if self.render:
+            fig = plt.figure(figsize=(7, 7))
+            self.plt_ax = fig.add_subplot(111)
+            plt.ion()
+            plt.show()
+
+            self.plots = {
+                'map': None,
+                'robot_gt': {
+                    'pose': None,
+                    'heading': None,
+                },
+                'robot_est':{
+                    'pose': None,
+                    'heading': None,
+                    'particles': None,
+                },
+            }
+
+    def __del__(self):
+        # to prevent plot from closing
+        plt.ioff()
+        plt.show()
 
     def train_mode(self):
         self.odom_net.train()
@@ -47,11 +83,14 @@ class DMCL():
     def to_tensor(self, array):
         return torch.from_numpy(array.copy()).float().to(constants.DEVICE)
 
+    def to_numpy(self, tensor):
+        return tensor.cpu().detach().numpy()
+
     def init_particles(self, init_pose):
         """
         """
 
-        limits = 5
+        limits = 100
         bounds = np.array([
             [init_pose[0] - limits, init_pose[0] + limits],
             [init_pose[1] - limits, init_pose[1] + limits],
@@ -65,7 +104,10 @@ class DMCL():
 
         rnd_probs = np.ones(constants.NUM_PARTICLES) / constants.NUM_PARTICLES
 
-        return self.to_tensor(rnd_particles), self.to_tensor(rnd_probs)
+        self.particles = self.to_tensor(rnd_particles)
+        self.particles_probs = self.to_tensor(rnd_probs)
+        self.update_figures()
+        return self.particles, self.particles_probs
 
     def transform_particles(self, particles):
         return torch.cat([
@@ -77,10 +119,16 @@ class DMCL():
             pose[0:2], torch.cos(pose[2:3]), torch.sin(pose[2:3])
         ], axis=-1)
 
-    def step(self, imgs, acts, particles, std = 0.75):
+    def step(self, particles, std = 0.75):
         """
         """
         self.train_mode()
+
+        # --------- RL Agent Network --------- #
+        # TODO: get action from trained agent
+        acts = self.env.action_space.sample() * 1.5
+        obs, reward, done, info = self.env.step(acts)
+        imgs = obs['rgb']
 
         # --------- Odometry Network --------- #
         #acts  = self.to_tensor(acts)
@@ -128,12 +176,18 @@ class DMCL():
 
         return particles, total_loss, mse
 
-    def predict(self, imgs, acts, particles):
+    def predict(self, particles):
         """
         """
         self.eval_mode()
 
         with torch.no_grad():
+
+            # --------- RL Agent Network --------- #
+            # TODO: get action from trained agent
+            acts = self.env.action_space.sample() * 1.5
+            obs, reward, done, info = self.env.step(acts)
+            imgs = obs['rgb']
 
             # --------- Odometry Network --------- #
             #acts  = self.to_tensor(acts)
@@ -159,6 +213,86 @@ class DMCL():
             particles = self.particles_net(particles, particles_probs)
 
         return particles, mse
+
+    def update_figures(self):
+        if self.render:
+            self.plots['map'] = self.plot_map(self.plots['map'])
+            self.plots['robot_gt']['pose'], self.plots['robot_gt']['heading'] = \
+                self.plot_robot_gt(self.plots['robot_gt']['pose'],
+                                   self.plots['robot_gt']['heading'], 'navy')
+
+            self.plots['robot_est']['particles'] = \
+                self.plot_particles(self.plots['robot_est']['particles'], 'coral')
+
+            plt.draw()
+            plt.pause(0.00000000001)
+
+    def plot_map(self, map_plt):
+        model_id = self.config_data['model_id']
+        model_path = get_model_path(model_id)
+        with open(os.path.join(model_path, 'floors.txt'), 'r') as f:
+            floors = sorted(list(map(float, f.readlines())))
+
+        floor_idx = self.env.floor_num
+        trav_map = cv2.imread(os.path.join(model_path, 'floor_trav_{0}.png'.format(floor_idx)))
+
+        origin_x, origin_y = 0., 0.
+
+        rows, cols, _ = trav_map.shape
+        x_max = (cols)/2 + origin_x
+        x_min = (-cols)/2 + origin_x
+        y_max = (rows/2) + origin_y
+        y_min = (-rows/2) + origin_y
+        extent = [x_min, x_max, y_min, y_max]
+
+        if map_plt is None:
+            map_plt = self.plt_ax.imshow(trav_map, cmap=plt.cm.binary, origin='upper', extent=extent)
+
+            self.plt_ax.grid()
+            self.plt_ax.plot(origin_x, origin_y, 'm+', markersize=12)
+            self.plt_ax.set_xlim([x_min, x_max])
+            self.plt_ax.set_ylim([y_min, y_max])
+
+            ticks_x = np.linspace(x_min, x_max)
+            ticks_y = np.linspace(y_min, y_max)
+            self.plt_ax.set_xticks(ticks_x, ' ')
+            self.plt_ax.set_yticks(ticks_y, ' ')
+            self.plt_ax.set_xlabel('x coords')
+            self.plt_ax.set_ylabel('y coords')
+        else:
+            pass
+        return map_plt
+
+    def plot_robot_gt(self, pose_plt, heading_plt, color):
+        gt_pose = helpers.get_gt_pose(self.robot)
+        return self.plot_robot(gt_pose, pose_plt, heading_plt, color)
+
+    def plot_robot(self, robot_pose, pose_plt, heading_plt, color):
+        pos_x, pos_y, heading = robot_pose
+
+        radius = 10.
+        len = 10.
+
+        xdata = [pos_x, pos_x + (radius + len) * np.cos(heading)]
+        ydata = [pos_y, pos_y + (radius + len) * np.sin(heading)]
+
+        if pose_plt is None:
+            pose_plt = Wedge( (pos_x, pos_y), radius, 0, 360, color=color, alpha=0.75)
+            self.plt_ax.add_artist(pose_plt)
+            heading_plt, = self.plt_ax.plot(xdata, ydata, color=color, alpha=0.75)
+        else:
+            pose_plt.update({'center': [pos_x, pos_y],})
+            heading_plt.update({'xdata': xdata, 'ydata': ydata,})
+        return pose_plt, heading_plt
+
+    def plot_particles(self, particles_plt, color):
+        particles = self.to_numpy(self.particles)
+
+        if particles_plt is None:
+            particles_plt = plt.scatter(particles[:, 0], particles[:, 1], s=12, c=color, alpha=0.5)
+        else:
+            particles_plt.set_offsets(particles[:, 0:2])
+        return particles_plt
 
     def save(self, file_name):
         torch.save({
