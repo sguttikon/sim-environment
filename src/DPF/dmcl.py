@@ -14,18 +14,16 @@ from gibson2.utils.assets_utils import get_model_path
 import os
 import cv2
 
-np.random.seed(42)
-random.seed(42)
-if constants.IS_CUDA:
-    torch.cuda.manual_seed(42)
-else:
-    torch.manual_seed(42)
+np.random.seed(constants.RANDOM_SEED)
+random.seed(constants.RANDOM_SEED)
+torch.cuda.manual_seed(constants.RANDOM_SEED)
+torch.manual_seed(constants.RANDOM_SEED)
 
 class DMCL():
     """
     """
 
-    def __init__(self, config_filename, render=False):
+    def __init__(self, config_filename, render=False, agent='RANDOM'):
         super(DMCL, self).__init__()
 
         self.odom_net = nets.OdomNetwork().to(constants.DEVICE)
@@ -34,17 +32,7 @@ class DMCL():
         self.particles_net = nets.ParticlesNetwork().to(constants.DEVICE)
         self.action_net = nets.ActionNetwork().to(constants.DEVICE)
 
-        params = list(self.vision_net.parameters()) + \
-                 list(self.likelihood_net.parameters()) + \
-                 list(self.action_net.parameters())
-                 # TODO add odom net parameters for optimization
-        self.optimizer = torch.optim.Adam(params, lr=2e-4)
-        self.env = NavigateRandomEnv(config_file = config_filename,
-                    mode = 'headless',  # ['headless', 'gui']
-        )
-        self.config_data = parse_config(config_filename)
-        self.robot = self.env.robots[0]
-
+        self.agent_type = agent
         self.render = render
         if self.render:
             fig = plt.figure(figsize=(7, 7))
@@ -64,6 +52,23 @@ class DMCL():
                     'particles': None,
                 },
             }
+
+            mode = 'gui'
+        else:
+            mode = 'headless'
+
+        params = list(self.vision_net.parameters()) + \
+                 list(self.likelihood_net.parameters()) + \
+                 list(self.action_net.parameters())
+                 # TODO add odom net parameters for optimization
+        self.optimizer = torch.optim.Adam(params, lr=2e-4)
+        self.env = NavigateRandomEnv(config_file = config_filename,
+                    mode = mode,  # ['headless', 'gui']
+        )
+        self.env.seed(constants.RANDOM_SEED)
+        self.config_data = parse_config(config_filename)
+        self.robot = self.env.robots[0]
+        self.map_res = self.config_data['trav_map_resolution']
 
     def __del__(self):
         # to prevent plot from closing
@@ -95,18 +100,25 @@ class DMCL():
         """
         self.curr_obs = self.env.reset()
 
-        init_pose = helpers.get_gt_pose(self.robot)
-        limits = 200
-        bounds = np.array([
-            [init_pose[0] - limits, init_pose[0] + limits],
-            [init_pose[1] - limits, init_pose[1] + limits],
-            [-np.pi/6, np.pi/6],
-        ])
+        rnd_particles = []
+        for idx in range(constants.NUM_PARTICLES):
+            _, self.initial_pos = self.env.scene.get_random_point_floor(self.env.floor_num, self.env.random_height)
+            self.initial_orn = np.array([0, 0, np.random.uniform(0, np.pi * 2)])
+            rnd_particles.append([self.initial_pos[0], self.initial_pos[1], self.initial_orn[2]])
+        rnd_particles = np.array(rnd_particles)
 
-        rnd_particles = np.array([
-            np.random.uniform(bounds[d][0], bounds[d][1], constants.NUM_PARTICLES)
-                for d in range(constants.STATE_DIMS)
-        ]).T
+        # init_pose = helpers.get_gt_pose(self.robot)
+        # limits = 200
+        # bounds = np.array([
+        #     [init_pose[0] - limits, init_pose[0] + limits],
+        #     [init_pose[1] - limits, init_pose[1] + limits],
+        #     [-np.pi/6, np.pi/6],
+        # ])
+        #
+        # rnd_particles = np.array([
+        #     np.random.uniform(bounds[d][0], bounds[d][1], constants.NUM_PARTICLES)
+        #         for d in range(constants.STATE_DIMS)
+        # ]).T
 
         rnd_probs = np.ones(constants.NUM_PARTICLES) / constants.NUM_PARTICLES
 
@@ -125,6 +137,20 @@ class DMCL():
             pose[0:2], torch.cos(pose[2:3]), torch.sin(pose[2:3])
         ], axis=-1)
 
+    def get_entropy(self, diff_particles, particles_probs):
+        # reference https://math.stackexchange.com/questions/195911/calculation-of-the-covariance-of-gaussian-mixtures
+        cov = torch.zeros((4, 4)).to(constants.DEVICE)
+        cov[0, 0] = 0.5 * 0.5
+        cov[1, 1] = 0.5 * 0.5
+        cov[2, 2] = 0.5 * 0.5
+        cov[3, 3] = 0.5 * 0.5
+        cov = cov.unsqueeze(0).repeat(diff_particles.shape[0], 1, 1)
+
+        cov_particles = torch.sum(cov * particles_probs[:, None, None], axis=0) + \
+                torch.sum(torch.var(diff_particles, dim=0, keepdim=True) * particles_probs[:, None], axis=0)
+        # reference https://en.wikipedia.org/wiki/Multivariate_normal_distribution
+        return 0.5 * np.log(np.linalg.det(2 * np.pi * np.e * self.to_numpy(cov_particles)))
+
     def step(self, particles, std = 0.75):
         """
         """
@@ -136,10 +162,9 @@ class DMCL():
         encoded_imgs = self.vision_net(imgs)
 
         # --------- Agent Network --------- #
-        agent = 'TRAIN'
-        if agent == 'RANDOM':
+        if self.agent_type == 'RANDOM':
             acts = self.env.action_space.sample() * 2
-        elif agent == 'TRAIN':
+        elif self.agent_type == 'TRAIN':
             acts = self.to_numpy(self.action_net(encoded_imgs))[0]
 
         # take action in environment
@@ -171,10 +196,13 @@ class DMCL():
         loss = torch.mean(-torch.log(1e-8 + gaussian_pdf))
 
         # to monitor: calculate mix of gaussians
-        mean_particles = torch.sum(trans_particles*particles_probs.unsqueeze(1), axis=0)
+        mean_particles = torch.sum(trans_particles*particles_probs[:, None], axis=0)
         mse = helpers.eucld_dist(gt_pose, mean_particles)
 
-        total_loss = loss
+        diff_particles = trans_particles - mean_particles
+        entropy = self.get_entropy(diff_particles, particles_probs)
+
+        total_loss = loss + entropy
 
         # --------- Backward Pass --------- #
         self.optimizer.zero_grad()
@@ -186,7 +214,7 @@ class DMCL():
 
         particles = particles.detach() # stop gradient flow here
 
-        return particles, total_loss, mse
+        return particles, { 'total_loss': total_loss, 'loss': loss, 'entropy': entropy, 'mse': mse }
 
     def predict(self, particles):
         """
@@ -201,10 +229,9 @@ class DMCL():
             encoded_imgs = self.vision_net(imgs)
 
             # --------- Agent Network --------- #
-            agent = 'TRAIN'
-            if agent == 'RANDOM':
+            if self.agent_type == 'RANDOM':
                 acts = self.env.action_space.sample() * 2
-            elif agent == 'TRAIN':
+            elif self.agent_type == 'TRAIN':
                 acts = self.to_numpy(self.action_net(encoded_imgs))[0]
 
             # take action in environment
@@ -224,15 +251,18 @@ class DMCL():
 
             # to monitor: calculate mix of gaussians
             gt_pose = self.transform_pose(self.to_tensor(helpers.get_gt_pose(self.robot)))
-            mean_particles = torch.sum(trans_particles*particles_probs.unsqueeze(1), axis=0)
+            mean_particles = torch.sum(trans_particles*particles_probs[:, None], axis=0)
             mse = helpers.eucld_dist(gt_pose, mean_particles)
+
+            diff_particles = trans_particles - mean_particles
+            entropy = self.get_entropy(diff_particles, particles_probs)
 
             # --------- Particle Network -------- #
             particles = self.particles_net(particles, particles_probs)
 
             self.particles = particles
             self.update_figures()
-        return particles, mse
+        return particles, { 'entropy': entropy, 'mse': mse }
 
     def update_figures(self):
         if self.render:
@@ -258,16 +288,17 @@ class DMCL():
         floor_idx = self.env.floor_num
         trav_map = cv2.imread(os.path.join(model_path, 'floor_trav_{0}.png'.format(floor_idx)))
 
-        origin_x, origin_y = 0., 0.
+        origin_x, origin_y = 0.*self.map_res, 0*self.map_res
 
         rows, cols, _ = trav_map.shape
-        x_max = (cols)/2 + origin_x
-        x_min = (-cols)/2 + origin_x
-        y_max = (rows/2) + origin_y
-        y_min = (-rows/2) + origin_y
+        x_max = (cols * self.map_res)/2 + origin_x
+        x_min = (-cols * self.map_res)/2 + origin_x
+        y_max = (rows * self.map_res/2) + origin_y
+        y_min = (-rows * self.map_res/2) + origin_y
         extent = [x_min, x_max, y_min, y_max]
 
         if map_plt is None:
+            trav_map = cv2.flip(trav_map, 0)
             map_plt = self.plt_ax.imshow(trav_map, cmap=plt.cm.binary, origin='upper', extent=extent)
 
             self.plt_ax.grid()
@@ -296,9 +327,11 @@ class DMCL():
 
     def plot_robot(self, robot_pose, pose_plt, heading_plt, color):
         pos_x, pos_y, heading = robot_pose
+        pos_x = pos_x/self.map_res
+        pos_y = pos_y/self.map_res
 
-        radius = 10.
-        len = 10.
+        radius = 10.*self.map_res
+        len = 10.*self.map_res
 
         xdata = [pos_x, pos_x + (radius + len) * np.cos(heading)]
         ydata = [pos_y, pos_y + (radius + len) * np.sin(heading)]
@@ -313,7 +346,7 @@ class DMCL():
         return pose_plt, heading_plt
 
     def plot_particles(self, particles_plt, color):
-        particles = self.to_numpy(self.particles)
+        particles = self.to_numpy(self.particles)/self.map_res
 
         if particles_plt is None:
             particles_plt = plt.scatter(particles[:, 0], particles[:, 1], s=12, c=color, alpha=0.5)
@@ -336,6 +369,7 @@ class DMCL():
         #self.odom_net.load_state_dict(checkpoint['odom_net'])
         self.vision_net.load_state_dict(checkpoint['vision_net'])
         self.likelihood_net.load_state_dict(checkpoint['likelihood_net'])
-        self.action_net.load_state_dict(checkpoint['action_net'])
+        if self.agent_type == 'TRAIN':
+            self.action_net.load_state_dict(checkpoint['action_net'])
         #self.particles_net.load_state_dict(checkpoint['particles_net'])
         print('=> loaded checkpoint')
