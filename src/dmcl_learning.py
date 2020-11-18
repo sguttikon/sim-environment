@@ -38,7 +38,9 @@ def train():
     train_idx = 0
     eval_idx = 0
     acc = np.inf
+    ent = np.inf
     for curr_epoch in range(num_epochs):
+        # train
         particles, particles_probs = dmcl.init_particles()
         cum_loss = 0.
         cum_acc = 0.
@@ -65,6 +67,7 @@ def train():
             file_path = 'saved_models/train_model_{}.pt'.format(curr_epoch)
             dmcl.save(file_path)
 
+            # eval
             particles, particles_probs = dmcl.init_particles()
             cum_acc = 0.
             for curr_step in range(epoch_len):
@@ -79,11 +82,12 @@ def train():
             writer.add_scalar('eval/eps_end_mse', info['mse'].item(), train_idx)
 
             mean_acc = cum_acc / epoch_len
-            if mean_acc < acc:
+            if mean_acc < acc and info['entropy'].item() < ent:
                 acc = mean_acc
+                ent = info['entropy'].item()
                 file_path = 'best_models/model.pt'
                 dmcl.save(file_path)
-                print('=> best accuracy: {0:.4f}'.format(acc))
+                print('=> best accuracy: {0:.4f}, entropy: {1:.4f}'.format(acc, ent))
 
     writer.close()
 
@@ -95,10 +99,12 @@ def test():
     file_path = 'best_models/model.pt'
     dmcl.load(file_path)
 
-    epoch_len = 10
-    particles, particles_probs = dmcl.init_particles()
-    for curr_step in range(epoch_len):
-        particles, info = dmcl.predict(particles)
+    num_epochs = 5
+    epoch_len = 50
+    for curr_epoch in range(num_epochs):
+        particles, particles_probs = dmcl.init_particles()
+        for curr_step in range(epoch_len):
+            particles, info = dmcl.predict(particles)
         print('episode entropy: {0:.4f}, episode mse: {1:.4f}'.format(info['entropy'].item(), info['mse'].item()))
 
 if __name__ == '__main__':
