@@ -26,7 +26,7 @@ class DMCL():
     def __init__(self, config_filename, render=False, agent='RANDOM'):
         super(DMCL, self).__init__()
 
-        self.odom_net = nets.OdomNetwork().to(constants.DEVICE)
+        self.motion_net = nets.MotionNetwork().to(constants.DEVICE)
         self.vision_net = nets.VisionNetwork().to(constants.DEVICE)
         self.likelihood_net = nets.LikelihoodNetwork().to(constants.DEVICE)
         self.particles_net = nets.ParticlesNetwork().to(constants.DEVICE)
@@ -76,14 +76,14 @@ class DMCL():
         plt.show()
 
     def train_mode(self):
-        self.odom_net.train()
+        self.motion_net.train()
         self.vision_net.train()
         self.likelihood_net.train()
         self.particles_net.train()
         self.action_net.train()
 
     def eval_mode(self):
-        self.odom_net.eval()
+        self.motion_net.eval()
         self.vision_net.eval()
         self.likelihood_net.eval()
         self.particles_net.eval()
@@ -173,7 +173,7 @@ class DMCL():
 
         # --------- Odometry Network --------- #
         #acts  = self.to_tensor(acts)
-        particles = self.odom_net(particles, acts)
+        particles = self.motion_net(particles, acts)
 
         # --------- Observation Likelihood ------- #
         trans_particles = self.transform_particles(particles)
@@ -240,7 +240,7 @@ class DMCL():
 
             # --------- Odometry Network --------- #
             #acts  = self.to_tensor(acts)
-            particles = self.odom_net(particles, acts)
+            particles = self.motion_net(particles, acts)
 
             # --------- Observation Likelihood ------- #
             trans_particles = self.transform_particles(particles)
@@ -356,7 +356,7 @@ class DMCL():
 
     def save(self, file_name):
         torch.save({
-            #'odom_net': self.odom_net.state_dict(),
+            #'motion_net': self.motion_net.state_dict(),
             'vision_net': self.vision_net.state_dict(),
             'likelihood_net': self.likelihood_net.state_dict(),
             'action_net': self.action_net.state_dict(),
@@ -366,7 +366,7 @@ class DMCL():
 
     def load(self, file_name):
         checkpoint = torch.load(file_name)
-        #self.odom_net.load_state_dict(checkpoint['odom_net'])
+        #self.motion_net.load_state_dict(checkpoint['motion_net'])
         self.vision_net.load_state_dict(checkpoint['vision_net'])
         self.likelihood_net.load_state_dict(checkpoint['likelihood_net'])
         if self.agent_type == 'TRAIN':
