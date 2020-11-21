@@ -70,44 +70,72 @@ class LikelihoodNetwork(nn.Module):
         x = x*(1 - min_obs_likelihood) + min_obs_likelihood # is this step required ?
         return x # shape: [N, 1]
 
-class OdomNetwork(nn.Module):
+class MotionNetwork(nn.Module):
     """
     """
 
     def __init__(self):
-        super(OdomNetwork, self).__init__()
-        # TODO
+        super(MotionNetwork, self).__init__()
+        self.in_features = 2 * constants.ACTION_DIMS
 
-    def forward(self, particles, acts):
+        # model
+        self.noise_gen_model = nn.Sequential(
+            nn.Linear(in_features=self.in_features, out_features=32), # shape: [N, 4]
+            nn.ReLU(),
+            nn.Linear(in_features=32, out_features=32), # shape: [N, 32]
+            nn.ReLU(),
+            nn.Linear(in_features=32, out_features=constants.STATE_DIMS), # shape: [N, 32]
+        )
+
+    def forward(self, old_poses, actions, delta_t, learn_noise=False, simple_model=False):
         # reference: probabilistic robotics: 'algorithm sample_motion_model_velocity()'
 
-        # -------- NON-LEARNING --------- #
-        alpha1 = alpha2 = alpha3 = alpha4 = alpha5 = alpha6 = 0.2
-        delta_t = 1.
+        old_poses = helpers.to_tensor(old_poses)
+        delta_t = helpers.to_tensor(delta_t)[:, None]
+        if learn_noise:
+            # ------- learn the noisy actions ------- #
+            rnd_input = np.random.normal(loc=0.0, scale=1.0, size=actions.shape)
+            input = np.concatenate((actions, rnd_input), axis=-1)
+            input = helpers.to_tensor(input)
+            action_delta = self.noise_gen_model(input)
 
-        lin_vel = acts[0]
-        ang_vel = acts[1]
+            noisy_actions = action_delta
+            noisy_actions[:, 0:2] = noisy_actions[:, 0:2] + helpers.to_tensor(actions)
 
-        # noisy linear velocity
-        sigma = np.sqrt(alpha1*lin_vel*lin_vel + alpha2*ang_vel*ang_vel)
-        lin_vel_hat = (lin_vel + np.random.normal(0., sigma)) * delta_t
-        # noisy angular velocity
-        sigma = np.sqrt(alpha3*lin_vel*lin_vel + alpha4*ang_vel*ang_vel)
-        ang_vel_hat = (ang_vel + np.random.normal(0., sigma)) * delta_t
-        # bearing correction
-        sigma = np.sqrt(alpha5*lin_vel*lin_vel + alpha6*ang_vel*ang_vel)
-        bearing_hat = np.random.normal(0., sigma) * delta_t
+            # noisy actions
+            lin_vel_hat = noisy_actions[:, 0:1]*delta_t
+            ang_vel_hat = noisy_actions[:, 1:2]*delta_t
+            gamma_hat = noisy_actions[:, 2:3]*delta_t
+        else:
+            # ------- don't learn the noisy actions ------- #
+            alpha1 = alpha2 = alpha3 = alpha4 = alpha5 = alpha6 = 0.02
+            lin_vel = actions[:, 0]
+            ang_vel = actions[:, 1]
 
-        radius = torch.div(lin_vel_hat, ang_vel_hat)
-        theta = particles[:, 2:3]
+            std1 = np.sqrt(alpha1*lin_vel*lin_vel + alpha2*ang_vel*ang_vel)
+            std2 = np.sqrt(alpha3*lin_vel*lin_vel + alpha4*ang_vel*ang_vel)
+            std3 = np.sqrt(alpha5*lin_vel*lin_vel + alpha6*ang_vel*ang_vel)
 
-        particles[:, 0:1] = particles[:, 0:1] - radius*torch.sin(theta) + \
-                            radius*torch.sin(theta + ang_vel_hat)
-        particles[:, 1:2] = particles[:, 1:2] + radius*torch.cos(theta) - \
-                            radius*torch.cos(theta + ang_vel_hat)
-        particles[:, 2:3] = helpers.wrap_angle(theta + ang_vel_hat + bearing_hat)
+            # noisy actions
+            lin_vel_hat = lin_vel + np.random.normal(loc=.0, scale=std1)*delta_t
+            ang_vel_hat = ang_vel + np.random.normal(loc=.0, scale=std2)*delta_t
+            gamma_hat = np.random.normal(loc=.0, scale=std3)*delta_t
 
-        return particles
+        x = old_poses[:, 0:1]
+        y = old_poses[:, 1:2]
+        theta = helpers.wrap_angle(old_poses[:, 2:3])
+        if simple_model:
+            x_prime = x + lin_vel_hat*torch.cos(theta)
+            y_prime = y + ang_vel_hat*torch.sin(theta)
+            theta_prime = helpers.wrap_angle(theta + ang_vel_hat)
+        else:
+            radius = torch.div(lin_vel_hat, ang_vel_hat + 1e-8)
+            x_prime = x + radius*(torch.sin(theta + ang_vel_hat) - torch.sin(theta))
+            y_prime = y + radius*(torch.cos(theta) - torch.cos(theta + ang_vel_hat))
+            theta_prime = helpers.wrap_angle(theta + ang_vel_hat + gamma_hat)
+
+        new_poses = torch.cat([x_prime, y_prime, theta_prime], axis=-1)
+        return new_poses # shape: [N, 3]
 
 class ParticlesNetwork(nn.Module):
     """
@@ -155,3 +183,26 @@ class ActionNetwork(nn.Module):
     def forward(self, x):
         x = self.fc_model(x)
         return x # shape: [N, 2]
+
+class MotionModel(nn.Module):
+    """
+    """
+
+    def __init__(self):
+        super(MotionModel, self).__init__()
+        self.in_features = constants.STATE_DIMS + constants.ACTION_DIMS + 1
+
+        # model
+        self.fc_model = nn.Sequential(
+            nn.Linear(in_features=self.in_features, out_features=128), # shape: [N, 5]
+            nn.ReLU(),
+            nn.Linear(in_features=128, out_features=128), # shape: [N, 128]
+            nn.ReLU(),
+            nn.Linear(in_features=128, out_features=128), # shape: [N, 128]
+            nn.ReLU(),
+            nn.Linear(in_features=128, out_features=constants.STATE_DIMS), # shape: [N, 3]
+        )
+
+    def forward(self, x):
+        x = self.fc_model(x)
+        return x # shape: [N, 3]
