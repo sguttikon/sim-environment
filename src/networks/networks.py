@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import utils.constants as constants
 import utils.helpers as helpers
 import numpy as np
@@ -9,21 +10,20 @@ class VisionNetwork(nn.Module):
     """
     """
 
-    def __init__(self):
+    def __init__(self, w, h):
         super(VisionNetwork, self).__init__()
 
         # w, h, kernel, padding, stride
-        w, h = 128, 128
         w, h = self.cal_out_dim(w, h, 8, 0, 4)
         w, h = self.cal_out_dim(w, h, 4, 0, 2)
         w, h = self.cal_out_dim(w, h, 3, 0, 1)
         in_features = 1 * 64 * w * h
 
-        # TODO: also include map of environment ??
+        self.in_features = 3 + 3 # include map image
 
         # model
         self.conv_model = nn.Sequential(
-            nn.Conv2d(in_channels=3, out_channels=32, kernel_size=8, stride=4), # shape: [N, 3, 128, 128]
+            nn.Conv2d(in_channels=self.in_features, out_channels=32, kernel_size=8, stride=4), # shape: [N, 3, 128, 128]
             nn.ReLU(),
             nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2), # shape: [N, 32, 31, 31]
             nn.ReLU(),
@@ -55,20 +55,29 @@ class LikelihoodNetwork(nn.Module):
         self.in_features = constants.VISUAL_FEATURES + 4
 
         # model
-        self.fc_model = nn.Sequential(
-            nn.Linear(in_features=self.in_features, out_features=128), # shape: [N, 67]
-            nn.ReLU(),
-            nn.Linear(in_features=128, out_features=128), # shape: [N, 128]
-            nn.ReLU(),
-            nn.Linear(in_features=128, out_features=1), # shape: [N, 128]
-            nn.Softmax(dim=0),
-        )
+        # self.fc_model = nn.Sequential(
+        #     nn.Linear(in_features=self.in_features, out_features=128), # shape: [N, 68]
+        #     nn.ReLU(),
+        #     nn.Linear(in_features=128, out_features=128), # shape: [N, 128]
+        #     nn.ReLU(),
+        #     nn.Linear(in_features=128, out_features=1), # shape: [N, 128]
+        #     nn.Softmax(dim=1),
+        # )
+        self.fc1 = nn.Linear(in_features=self.in_features, out_features=128) # shape: [N, 68]
+        self.fc2 = nn.Linear(in_features=128, out_features=128) # shape: [N, 128]
+        self.fc3 = nn.Linear(in_features=128, out_features=1) # shape: [N, 128]
+        self.softmax1 = nn.Softmax(dim=1)
 
     def forward(self, x):
-        x = self.fc_model(x)
-        min_obs_likelihood =  0.004
-        x = x*(1 - min_obs_likelihood) + min_obs_likelihood # is this step required ?
-        return x # shape: [N, 1]
+        #x = self.fc_model(x)
+        #min_obs_likelihood =  0.004
+        #x = x*(1 - min_obs_likelihood) + min_obs_likelihood # is this step required ?
+
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        embedding = x
+        x = self.fc3(x)
+        return embedding, x # shape: [N, 1]
 
 class MotionNetwork(nn.Module):
     """

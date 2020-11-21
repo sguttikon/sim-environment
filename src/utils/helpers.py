@@ -105,3 +105,8 @@ def sample_motion_model_velocity(vel_cmd, old_pose, delta_t=1., use_noise=False)
         new_pose = np.array([est_x, est_y, est_theta])
 
     return new_pose
+
+def transform_poses(poses):
+    return torch.cat([
+        poses[:, 0:2], torch.cos(poses[:, 2:3]), torch.sin(poses[:, 2:3])
+    ], axis=-1)

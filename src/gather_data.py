@@ -4,7 +4,6 @@ from gibson2.envs.locomotor_env import NavigateRandomEnv, NavigateEnv
 import utils.helpers as helpers
 import networks.networks as nets
 import numpy as np
-import torch
 import random
 import gibson2
 import os
@@ -23,7 +22,7 @@ a       d
     s
 '''
 
-def main():
+def sim_env():
     curr_dir_path = os.path.dirname(os.path.abspath(__file__))
     config_filename = os.path.join(curr_dir_path, 'config/turtlebot_demo.yaml')
     nav_env = NavigateRandomEnv(config_file=config_filename, mode='gui')
@@ -66,7 +65,7 @@ def main():
             old_vel_cmd = new_vel_cmd
             old_delta_t = new_delta_t
 
-        file_name = 'rnd_pose_data/data_{:04d}.pkl'.format(j)
+        file_name = 'rnd_pose_obs_data/data_{:04d}.pkl'.format(j)
         with open(file_name, 'wb') as file:
             pickle.dump(eps_data, file)
 
@@ -76,6 +75,26 @@ def load_data():
         for eps_data in data:
             print(eps_data['id'], eps_data['pose'], eps_data['vel_cmd'], eps_data['delta_t'], eps_data['state']['rgb'].shape)
 
+def store_rnd_particles(num_particles=5000):
+    curr_dir_path = os.path.dirname(os.path.abspath(__file__))
+    config_filename = os.path.join(curr_dir_path, 'config/turtlebot_demo.yaml')
+    nav_env = NavigateRandomEnv(config_file=config_filename, mode='gui')
+
+    num_epochs = 100
+    for j in range(num_epochs):
+        nav_env.reset()
+        rnd_particles = []
+        for idx in range(num_particles):
+            _, initial_pos = nav_env.scene.get_random_point_floor(nav_env.floor_num, nav_env.random_height)
+            initial_orn = np.array([0, 0, np.random.uniform(0, np.pi * 2)])
+            rnd_particles.append([initial_pos[0], initial_pos[1], initial_orn[2]])
+        rnd_particles = np.array(rnd_particles)
+
+        file_name = 'rnd_particles_data/particles_{:04d}.pkl'.format(j)
+        with open(file_name, 'wb') as file:
+            pickle.dump(rnd_particles, file)
+
 if __name__ == "__main__":
-    #main()
-    load_data()
+    #sim_env()
+    #load_data()
+    store_rnd_particles()
