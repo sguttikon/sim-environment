@@ -10,7 +10,7 @@ trav_map_erosion: 2
 
 # robot
 robot: Turtlebot
-is_discrete: false
+is_discrete: true
 velocity: 1.0
 
 # task, observation and action
@@ -43,8 +43,8 @@ output: [sensor, rgb, depth, scan]
 # ASUS Xtion PRO LIVE
 # https://www.asus.com/us/3D-Sensor/Xtion_PRO_LIVE
 fisheye: false
-image_width: 128
-image_height: 128
+image_width: 256
+image_height: 256
 vertical_fov: 45
 # depth
 depth_low: 0.8

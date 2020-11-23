@@ -12,7 +12,7 @@ def get_gt_pose(robot):
     gt_pose = np.array([
         position[0],
         position[1],
-        wrap_angle(euler[0])
+        wrap_angle(euler[0], use_numpy=True)
     ])
     return gt_pose
 
@@ -37,12 +37,15 @@ def to_tensor(array):
 def to_numpy(tensor):
     return tensor.cpu().detach().numpy()
 
-def eucld_dist(pose1, pose2):
+def eucld_dist(pose1, pose2, use_numpy=False):
     """
     """
     diff = pose1-pose2
     if len(diff.shape) == 1:
-        return torch.norm(diff)
+        if use_numpy:
+            return np.linalg.norm(diff)
+        else:
+            return torch.norm(diff)
     else:
         return torch.norm(diff, dim=1)
 
@@ -107,6 +110,22 @@ def sample_motion_model_velocity(vel_cmd, old_pose, delta_t=1., use_noise=False)
     return new_pose
 
 def transform_poses(poses):
-    return torch.cat([
-        poses[:, 0:2], torch.cos(poses[:, 2:3]), torch.sin(poses[:, 2:3])
-    ], axis=-1)
+    if len(poses.shape) == 1:
+        return torch.cat([
+            poses[0:2], torch.cos(poses[2:3]), torch.sin(poses[2:3])
+        ], axis=-1)
+    else:
+        return torch.cat([
+            poses[:, 0:2], torch.cos(poses[:, 2:3]), torch.sin(poses[:, 2:3])
+        ], axis=-1)
+
+def get_triplet_labels(gt_pose, particles, desc=False):
+    dist = eucld_dist(gt_pose, particles)
+    _, indices = torch.sort(dist, descending=desc)
+    return indices
+
+def get_mse_loss(gt_pose, particles, std = 0.5):
+    sqrt_dist = eucld_dist(gt_pose, particles)
+    activations = (1/(particles.shape[0]*np.sqrt(2 *np.pi * std**2))) * torch.exp(-sqrt_dist/(2 * std**2))
+    loss = torch.mean(-torch.log(1e-16 + activations))
+    return loss

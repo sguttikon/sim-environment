@@ -30,64 +30,65 @@ def train():
     Path("saved_models").mkdir(parents=True, exist_ok=True)
     Path("best_models").mkdir(parents=True, exist_ok=True)
 
-    dmcl = DMCL(config_filename, render=False, agent='RANDOM')
+    dmcl = DMCL(config_filename, render=True, agent='RANDOM')
     writer = SummaryWriter()
 
-    num_epochs = 500
+    num_epochs = 2000
     epoch_len = 250
     train_idx = 0
     eval_idx = 0
-    acc = np.inf
-    ent = np.inf
+    best_err = np.inf
     for curr_epoch in range(num_epochs):
         # train
-        particles, particles_probs = dmcl.init_particles()
-        cum_loss = 0.
-        cum_acc = 0.
+        gt_pose, particles = dmcl.init_particles(is_uniform=True)
+        triplet_losses = []
+        mse_losses = []
         for curr_step in range(epoch_len):
             train_idx = train_idx + 1
 
-            particles, info = dmcl.step(particles)
+            gt_pose, particles, info = dmcl.step(particles)
 
-            writer.add_scalar('train/total_loss', info['total_loss'].item(), train_idx)
-            writer.add_scalar('train/measurement_loss', info['loss'].item(), train_idx)
-            writer.add_scalar('train/entropy', info['entropy'].item(), train_idx)
-            writer.add_scalar('train/mse', info['mse'].item(), train_idx)
-            cum_loss = cum_loss + info['total_loss'].item()
-            cum_acc = cum_acc + info['mse'].item()
-        writer.add_scalar('train/eps_end_entropy', info['entropy'].item(), train_idx)
-        writer.add_scalar('train/eps_end_mse', info['mse'].item(), train_idx)
+            writer.add_scalar('train/triplet_loss', info['triplet_loss'].item(), train_idx)
+            writer.add_scalar('train/mse_loss', info['mse_loss'].item(), train_idx)
+            triplet_losses.append(info['triplet_loss'].item())
+            mse_losses.append(info['mse_loss'].item())
 
-        mean_loss = cum_loss / epoch_len
-        mean_acc = cum_acc / epoch_len
-        print('mean loss: {0:.4f}, mean mse: {1:.4f}'.format(mean_loss, mean_acc))
-        print('episode entropy: {0:.4f}, episode mse: {1:.4f}'.format(info['entropy'].item(), info['mse'].item()))
+        mean_particles = np.mean(particles, axis=0)
+        curr_err = helpers.eucld_dist(gt_pose, mean_particles, use_numpy=True)
+        writer.add_scalar('train/pose_err', curr_err.item(), train_idx)
+
+        print('train=> mean triplet_loss: {0:.4f}, mean mse_loss: {1:.4f}, pose error: {2:.4f}'.\
+                format(np.array(triplet_losses).mean(), np.array(mse_losses).mean(), curr_err))
 
         if curr_epoch%10 == 0:
             file_path = 'saved_models/train_model_{}.pt'.format(curr_epoch)
             dmcl.save(file_path)
 
             # eval
-            particles, particles_probs = dmcl.init_particles()
-            cum_acc = 0.
+            gt_pose, particles = dmcl.init_particles(is_uniform=True)
+            triplet_losses = []
+            mse_losses = []
             for curr_step in range(epoch_len):
                 eval_idx = eval_idx + 1
 
-                particles, info = dmcl.predict(particles)
+                gt_pose, particles, info = dmcl.predict(particles)
 
-                writer.add_scalar('eval/entropy', info['entropy'].item(), eval_idx)
-                writer.add_scalar('eval/mse', info['mse'].item(), eval_idx)
-                cum_acc = cum_acc + info['mse'].item()
-            writer.add_scalar('eval/eps_end_entropy', info['entropy'].item(), train_idx)
-            writer.add_scalar('eval/eps_end_mse', info['mse'].item(), train_idx)
+                writer.add_scalar('eval/triplet_loss', info['triplet_loss'].item(), eval_idx)
+                writer.add_scalar('eval/mse_loss', info['mse_loss'].item(), eval_idx)
+                triplet_losses.append(info['triplet_loss'].item())
+                mse_losses.append(info['mse_loss'].item())
 
-            mean_acc = cum_acc / epoch_len
-            if mean_acc < acc and info['entropy'].item() < ent:
-                acc = mean_acc
-                ent = info['entropy'].item()
+            mean_particles = np.mean(particles, axis=0)
+            curr_err = helpers.eucld_dist(gt_pose, mean_particles, use_numpy=True)
+            writer.add_scalar('eval/pose_err', curr_err.item(), eval_idx)
+
+            print('eval=====> mean triplet_loss: {0:.4f}, mean mse_loss: {1:.4f}, pose error: {2:.4f}'.\
+                format(np.array(triplet_losses).mean(), np.array(mse_losses).mean(), curr_err))
+
+            if curr_err < best_err:
+                best_err = curr_err
                 file_path = 'best_models/model.pt'
                 dmcl.save(file_path)
-                print('=> best accuracy: {0:.4f}, entropy: {1:.4f}'.format(acc, ent))
 
     writer.close()
 
