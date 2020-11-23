@@ -19,7 +19,7 @@ torch.cuda.manual_seed(constants.RANDOM_SEED)
 torch.manual_seed(constants.RANDOM_SEED)
 np.set_printoptions(precision=3)
 (w, h) = (256, 256)
-num_particles = 10
+num_particles = 50
 batch_size = 25
 
 def get_motion_data(idx):
@@ -168,10 +168,23 @@ def compute_labels(gt_poses, rnd_particles):
         labels_batch.append(labels)
     return torch.stack(particles_batch), torch.stack(labels_batch)
 
-def get_labels(gt_pose, rnd_particles, desc=False):
+def get_triplet_labels(gt_pose, rnd_particles, desc=False):
     dist = helpers.eucld_dist(gt_pose, rnd_particles)
     _, indices = torch.sort(dist, descending=desc)
     return indices
+
+def get_mse_labels(gt_pose, rnd_particles, desc=False):
+    dist = 1 - helpers.eucld_dist(gt_pose, rnd_particles)
+    cnst = torch.Tensor([0.004]).to(constants.DEVICE)
+    dist = torch.where(dist > 0, dist, cnst)
+    labels = dist / dist.sum()
+    return labels
+
+def get_mse_loss(gt_pose, rnd_particles, std = 0.5):
+    sqrt_dist = helpers.eucld_dist(gt_pose, rnd_particles)
+    activations = (1/(rnd_particles.shape[0]*np.sqrt(2 *np.pi * std**2))) * torch.exp(-sqrt_dist/(2 * std**2))
+    loss = torch.mean(-torch.log(1e-16 + activations))
+    return loss
 
 def train_measurement_model():
     vision_net = nets.VisionNetwork(w, h).to(constants.DEVICE)
@@ -179,13 +192,13 @@ def train_measurement_model():
     vision_net.train()
     likeli_net.train()
     loss_fn = losses.TripletMarginLoss()
+    #loss_fn = losses.MSELoss()
     params = list(likeli_net.parameters()) + list(vision_net.parameters())
     optimizer = torch.optim.Adam(params, lr=2e-4)
     writer = SummaryWriter()
 
-    num_epochs = 1000
+    num_epochs = 500
     num_data_files = 75
-    num_batches = 20
     train_idx = 0
     for j in range(num_epochs):
         total_loss = 0
@@ -199,45 +212,59 @@ def train_measurement_model():
             imgs = torch.cat([rgbs, env_maps], axis=-1).permute(0, 3, 1, 2) # from NHWC to NCHW
             encoded_imgs = vision_net(imgs)
 
-            # particles = get_rnd_particles_data(idx)
-            # rnd_particles = []
-            # for particle in particles:
-            #     rnd_particles.append(helpers.transform_poses(helpers.to_tensor(particle)))
-            # rnd_particles = torch.stack(rnd_particles)
-            ## compute labels
-            #rnd_particles, labels = compute_labels(gt_poses, rnd_particles)
-            #encoded_imgs = encoded_imgs.unsqueeze(1).repeat(1, rnd_particles.shape[1], 1)
-
             gt_poses = helpers.transform_poses(helpers.to_tensor(gt_poses))
-            encoded_imgs = encoded_imgs.unsqueeze(1).repeat(1, num_particles, 1)
+            particles = get_rnd_particles_data(idx)
+            encoded_imgs = encoded_imgs.unsqueeze(1).repeat(1, particles.shape[1], 1)
             batch_loss = []
+
+            # TRIPLET LOSS
             for b_idx in range(batch_size):
-                rnd_particles = get_rnd_particles_data(idx)[b_idx]
-                rnd_particles = helpers.transform_poses(helpers.to_tensor(rnd_particles))
+                rnd_particles = helpers.transform_poses(helpers.to_tensor(particles[b_idx]))
 
                 input_features = torch.cat([encoded_imgs[b_idx], rnd_particles], axis=-1)
                 embeddings, _ = likeli_net(input_features)
-                labels = get_labels(gt_poses[b_idx], rnd_particles)
+                labels = get_triplet_labels(gt_poses[b_idx], rnd_particles)
 
-                arg_rnd_particles = rnd_particles + torch.normal(0., 0.2, size=(num_particles, 4)).to(constants.DEVICE)
-                input_features = torch.cat([encoded_imgs[b_idx], arg_rnd_particles], axis=-1)
+                arg_gt_poses = gt_poses[b_idx] + torch.normal(0., 0.1, \
+                            size=rnd_particles.shape).to(constants.DEVICE)
+                input_features = torch.cat([encoded_imgs[b_idx], arg_gt_poses], axis=-1)
                 augmented, _ = likeli_net(input_features)
-                arg_labels = get_labels(gt_poses[b_idx], rnd_particles)
+                arg_labels = get_triplet_labels(gt_poses[b_idx], arg_gt_poses)
 
                 embeddings = torch.cat([embeddings, augmented], dim=0)
                 labels = torch.cat([labels, arg_labels], dim=0)
 
-                b_loss = loss_fn(embeddings, labels)
+                #mse_loss = get_mse_loss(gt_poses[b_idx], rnd_particles)
+                triplet_loss = loss_fn(embeddings, labels)
+                b_loss = triplet_loss #+ mse_loss
                 batch_loss.append(b_loss)
 
                 writer.add_scalar('measurement_train/triplet_loss', b_loss.item(), train_idx)
+                #writer.add_scalar('measurement_train/mse_loss', mse_loss.item(), train_idx)
                 train_idx = train_idx + 1
                 total_loss = total_loss + b_loss.item()
+
+            # # MSE LOSS
+            # for b_idx in range(batch_size):
+            #     rnd_particles = helpers.transform_poses(helpers.to_tensor(particles[b_idx]))
+            #
+            #     input_features = torch.cat([encoded_imgs[b_idx], rnd_particles], axis=-1)
+            #     _, likelihoods = likeli_net(input_features)
+            #     labels = get_mse_labels(gt_poses[b_idx], rnd_particles)
+            #
+            #     b_loss = loss_fn(likelihoods, labels)
+            #     batch_loss.append(b_loss)
+            #
+            #     writer.add_scalar('measurement_train/mse_loss', b_loss.item(), train_idx)
+            #     train_idx = train_idx + 1
+            #     total_loss = total_loss + b_loss.item()
+
             loss = torch.stack(batch_loss).mean()
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
         print('mean triplet loss: {0}'.format(total_loss/(num_data_files*batch_size)))
+
     file_name = 'measurement_model.pt'
     torch.save({
         'vision_net': vision_net.state_dict(),
@@ -250,12 +277,40 @@ def test_measurement_model():
     likeli_net = nets.LikelihoodNetwork().to(constants.DEVICE)
     vision_net.eval()
     likeli_net.eval()
-    loss_fn = losses.TripletMarginLoss()
+    #loss_fn = losses.TripletMarginLoss()
+    loss_fn = losses.MSELoss()
 
     file_name = 'measurement_model.pt'
     checkpoint = torch.load(file_name)
     vision_net.load_state_dict(checkpoint['vision_net'])
     likeli_net.load_state_dict(checkpoint['likeli_net'])
+
+    num_epochs = 1
+    num_data_files = 75
+    for j in range(num_epochs):
+        rnd_idx = np.random.randint(0, num_data_files)
+        obs_data = get_observation_data(rnd_idx)
+
+        gt_poses = obs_data['obs_pose']
+        rgbs = helpers.to_tensor(obs_data['obs_rgb'])
+        env_maps = helpers.to_tensor(obs_data['env_map'])
+
+        imgs = torch.cat([rgbs, env_maps], axis=-1).permute(0, 3, 1, 2) # from NHWC to NCHW
+        encoded_imgs = vision_net(imgs)
+
+        gt_poses = helpers.transform_poses(helpers.to_tensor(gt_poses))
+        particles = get_rnd_particles_data(rnd_idx)
+        encoded_imgs = encoded_imgs.unsqueeze(1).repeat(1, particles.shape[1], 1)
+
+        b_idx = np.random.randint(0, batch_size)
+        rnd_particles = helpers.transform_poses(helpers.to_tensor(particles[b_idx]))
+
+        input_features = torch.cat([encoded_imgs[b_idx], rnd_particles], axis=-1)
+        _, likelihoods = likeli_net(input_features)
+        labels = get_mse_labels(gt_poses[b_idx], rnd_particles)
+        loss = loss_fn(likelihoods, labels)
+        print(likelihoods.shape, labels.shape, loss)
+
 
 if __name__ == '__main__':
     #train_motion_model()

@@ -66,7 +66,6 @@ class LikelihoodNetwork(nn.Module):
         self.fc1 = nn.Linear(in_features=self.in_features, out_features=128) # shape: [N, 68]
         self.fc2 = nn.Linear(in_features=128, out_features=128) # shape: [N, 128]
         self.fc3 = nn.Linear(in_features=128, out_features=1) # shape: [N, 128]
-        self.softmax1 = nn.Softmax(dim=1)
 
     def forward(self, x):
         #x = self.fc_model(x)
@@ -76,6 +75,7 @@ class LikelihoodNetwork(nn.Module):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         embedding = x
+        #x = F.softmax(self.fc3(x), dim=0)
         x = self.fc3(x)
         return embedding, x # shape: [N, 1]
 
