@@ -26,15 +26,16 @@ num_particles = 500
 batch_size = 25
 
 Path("saved_models").mkdir(parents=True, exist_ok=True)
+Path("best_models").mkdir(parents=True, exist_ok=True)
 
 motion_net = nets.MotionNetwork().to(constants.DEVICE)
-params = list(motion_net.parameters())
-motion_optim = torch.optim.Adam(params, lr=2e-4)
+motion_params = list(motion_net.parameters())
+motion_optim = torch.optim.Adam(motion_params, lr=2e-4)
 
 vision_net = nets.VisionNetwork(w, h).to(constants.DEVICE)
 likelihood_net = nets.LikelihoodNetwork().to(constants.DEVICE)
-params = list(likelihood_net.parameters()) + list(vision_net.parameters())
-measure_optim = torch.optim.Adam(params, lr=2e-4)
+measure_params = list(likelihood_net.parameters()) + list(vision_net.parameters())
+measure_optim = torch.optim.Adam(measure_params, lr=2e-4)
 
 def get_motion_data(idx):
     file_name = 'sup_data/rnd_pose_obs_data/data_{:04d}.pkl'.format(idx)
@@ -101,16 +102,31 @@ def get_observation_data(idx):
         observation_data[key] = np.asarray(observation_data[key])[rnd_indices]
     return observation_data
 
-def train_motion_model():
-    motion_net.train()
+def save_motion_model(file_name):
+    torch.save({
+        'motion_net': motion_net.state_dict(),
+        'optimizer': motion_optim.state_dict(),
+    }, file_name)
+
+def train_motion_model(use_noise=True, simple_model=False):
+    if simple_model:
+        file_name = 'motion_model_simple_{0}.pt'
+    else:
+        file_name = 'motion_model_complex_{0}.pt'
+
     loss_fn = nn.MSELoss()
     writer = SummaryWriter()
 
-    num_epochs = 1000
+    num_epochs = 2000
     num_data_files = 75
     train_idx = 0
+    eval_idx = 0
+    best_acc = np.inf
+
     for j in range(num_epochs):
-        total_loss = 0
+        # TRAIN
+        train_losses = []
+        motion_net.train()
         for idx in range(num_data_files):
             motion_data = get_motion_data(idx)
             gt_old_poses = motion_data['start_pose']
@@ -118,7 +134,7 @@ def train_motion_model():
             gt_actions = motion_data['action']
             gt_delta_t = motion_data['delta_t']
 
-            est_new_poses = motion_net(gt_old_poses, gt_actions, gt_delta_t, learn_noise=True, simple_model=False)
+            est_new_poses = motion_net(gt_old_poses, gt_actions, gt_delta_t, use_noise, simple_model)
 
             est_new_poses = helpers.transform_poses(est_new_poses)
             gt_new_poses = helpers.transform_poses(helpers.to_tensor(gt_new_poses))
@@ -130,16 +146,44 @@ def train_motion_model():
 
             writer.add_scalar('motion_train/mse_loss', loss.item(), train_idx)
             train_idx = train_idx + 1
-            total_loss = total_loss + loss.item()
-        print('mean mse loss: {0}'.format(total_loss/num_data_files))
-    file_name = 'motion_model.pt'
-    torch.save({
-        'motion_net': motion_net.state_dict(),
-        'optimizer': motion_optim.state_dict(),
-    }, file_name)
+            train_losses.append(float(loss))
+        print('mean mse loss: {0}'.format(np.mean(train_losses)))
 
-def test_motion_model():
-    file_name = 'motion_model_complex.pt'
+        if j%50 == 0:
+            save_motion_model('saved_models/' + file_name.format(j))
+
+            # EVAL
+            eval_losses = []
+            motion_net.eval()
+            for idx in range(5):
+                rnd_idx = np.random.randint(0, num_data_files)
+                motion_data = get_motion_data(rnd_idx)
+                gt_old_poses = motion_data['start_pose']
+                gt_new_poses = motion_data['end_pose']
+                gt_actions = motion_data['action']
+                gt_delta_t = motion_data['delta_t']
+
+                est_new_poses = motion_net(gt_old_poses, gt_actions, gt_delta_t, use_noise, simple_model)
+
+                gt_new_poses = helpers.transform_poses(helpers.to_tensor(gt_new_poses))
+                est_new_poses = helpers.transform_poses(est_new_poses)
+
+                loss = loss_fn(est_new_poses, gt_new_poses)
+                writer.add_scalar('motion_eval/mse_loss', loss.item(), eval_idx)
+                eval_idx = eval_idx + 1
+                eval_losses.append(float(loss))
+
+            if np.mean(eval_losses) < best_acc:
+                print('new best mse loss: {0}'.format(np.mean(eval_losses)))
+                best_acc = np.mean(eval_losses)
+                save_motion_model('best_models/' + file_name.format(0))
+    writer.close()
+
+def test_motion_model(use_noise, simple_model):
+    if simple_model:
+        file_name = 'motion_model_simple.pt'
+    else:
+        file_name = 'motion_model_complex.pt'
     checkpoint = torch.load(file_name)
     motion_net.load_state_dict(checkpoint['motion_net'])
 
@@ -159,7 +203,7 @@ def test_motion_model():
             gt_delta_t = motion_data['delta_t']
             print(gt_old_poses[10], gt_actions[10], gt_new_poses[10], gt_delta_t[10])
 
-            est_new_poses = motion_net(gt_old_poses, gt_actions, gt_delta_t, learn_noise=True, simple_model=False)
+            est_new_poses = motion_net(est_old_poses, gt_actions, gt_delta_t, use_noise, simple_model)
 
             gt_new_poses = helpers.transform_poses(helpers.to_tensor(gt_new_poses))
             est_new_poses = helpers.transform_poses(est_new_poses)
@@ -295,8 +339,9 @@ def train_measurement_model():
         print('mean triplet loss: {0}'.format(total_loss/(num_data_files*batch_size)))
 
         if j%50 == 0:
-            file_name = 'saved_models/measurement_model_train_{0}.pt'.format(train_idx)
+            file_name = 'saved_models/measurement_model_train_{0}.pt'.format(j)
             save_measurement_model(file_name)
+    writer.close()
 
 def test_measurement_model():
     file_name = 'saved_models/measurement_model_train_845625.pt'
@@ -353,9 +398,90 @@ def test_measurement_model():
             losses.append(float(loss))
         print('mean l1 loss: {0}'.format(np.mean(losses)))
 
+def plot_gt_trajectory(idx):
+    file_name = 'sup_data/rnd_pose_obs_data/data_{:04d}.pkl'.format(idx)
+    writer = SummaryWriter('runs/data_{0}/gt_trajectory'.format(idx))
+    with open(file_name,'rb') as file:
+        data = pickle.load(file)
+        gt_old_pose = None
+        for eps_idx in range(len(data)):
+            eps_data = data[eps_idx]
+            if gt_old_pose is None:
+                gt_old_pose = eps_data['pose']
+                continue
+
+            gt_new_pose = eps_data['pose']
+            gt_action = eps_data['vel_cmd']
+            gt_delta_t = eps_data['delta_t']
+
+            # plot trajectory as euclidean distance
+            trans_gt_old_pose = helpers.transform_poses(helpers.to_tensor(gt_old_pose))
+            trans_gt_new_pose = helpers.transform_poses(helpers.to_tensor(gt_new_pose))
+            eucld_dist = helpers.eucld_dist(trans_gt_old_pose, trans_gt_new_pose, use_numpy=False)
+            writer.add_scalar('eucld_dist', float(eucld_dist), eps_idx)
+
+            gt_old_pose = gt_new_pose
+    writer.close()
+
+def plot_est_trajectory(idx, use_learned, use_noise, simple_model):
+    if use_learned:
+        motion_net = nets.MotionNetwork().to(constants.DEVICE)
+        if simple_model:
+            file_name = 'motion_model_simple.pt'
+        else:
+            file_name = 'motion_model_complex.pt'
+        checkpoint = torch.load(file_name)
+        motion_net.load_state_dict(checkpoint['motion_net'])
+    else:
+        motion_net = nets.SampleMotionModel().to(constants.DEVICE)
+    motion_net.eval()
+
+    file_name = 'sup_data/rnd_pose_obs_data/data_{:04d}.pkl'.format(idx)
+
+    noise_type = 'noisy' if use_noise else 'no_noise'
+    model_type = 'learned' if use_learned else 'no_learned'
+    motion_type = 'simple' if simple_model else 'complex'
+    writer = SummaryWriter('runs/data_{0}/est_trajectory/{1}-{2}-{3}'.format(idx, model_type, noise_type, motion_type))
+    with open(file_name,'rb') as file:
+        data = pickle.load(file)
+        est_old_poses = None
+        for eps_idx in range(len(data)):
+            eps_data = data[eps_idx]
+            if est_old_poses is None:
+                est_old_poses = np.asarray([eps_data['pose']])
+                continue
+
+            gt_actions = np.asarray([eps_data['vel_cmd']])
+            gt_delta_t = np.asarray([eps_data['delta_t']])
+
+            est_new_poses = motion_net(est_old_poses, gt_actions, gt_delta_t, use_noise, simple_model)
+
+            if use_learned:
+                est_new_poses = helpers.to_numpy(est_new_poses)
+
+            # plot trajectory as euclidean distance
+            trans_est_old_poses = helpers.transform_poses(helpers.to_tensor(est_old_poses))
+            trans_est_new_poses = helpers.transform_poses(helpers.to_tensor(est_new_poses))
+            eucld_dist = helpers.eucld_dist(trans_est_old_poses, trans_est_new_poses, use_numpy=False)
+            writer.add_scalar('eucld_dist', float(eucld_dist), eps_idx)
+
+            est_old_poses = est_new_poses
+    writer.close()
+
 if __name__ == '__main__':
-    #train_motion_model()
-    #test_motion_model()
+    train_motion_model(simple_model=True)
+    train_motion_model(simple_model=False)
+    #test_motion_model(noise_type, model_type)
 
     #train_measurement_model()
-    test_measurement_model()
+    #test_measurement_model()
+
+    # num_data_files = 75
+    # rnd_idx = np.random.randint(0, num_data_files)
+    # plot_gt_trajectory(rnd_idx)
+    # plot_est_trajectory(rnd_idx, use_learned=False, use_noise=False, simple_model=True)
+    # plot_est_trajectory(rnd_idx, use_learned=False, use_noise=False, simple_model=False)
+    # plot_est_trajectory(rnd_idx, use_learned=False, use_noise=True, simple_model=True)
+    # plot_est_trajectory(rnd_idx, use_learned=False, use_noise=True, simple_model=False)
+    # plot_est_trajectory(rnd_idx, use_learned=True, use_noise=True, simple_model=False)
+    # plot_est_trajectory(idx, use_learned=True, use_noise=True, simple_model=True)
