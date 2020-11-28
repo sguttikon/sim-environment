@@ -50,29 +50,17 @@ class LikelihoodNetwork(nn.Module):
     """
     """
 
-    def __init__(self):
+    def __init__(self, num_particles):
         super(LikelihoodNetwork, self).__init__()
-        self.in_features = constants.VISUAL_FEATURES + 4
+        self.in_features = constants.VISUAL_FEATURES + num_particles * 4
 
         # model
-        # self.fc_model = nn.Sequential(
-        #     nn.Linear(in_features=self.in_features, out_features=128), # shape: [N, 68]
-        #     nn.ReLU(),
-        #     nn.Linear(in_features=128, out_features=128), # shape: [N, 128]
-        #     nn.ReLU(),
-        #     nn.Linear(in_features=128, out_features=1), # shape: [N, 128]
-        #     nn.Softmax(dim=1),
-        # )
         self.fc1 = nn.Linear(in_features=self.in_features, out_features=128) # shape: [N, 68]
         self.fc2 = nn.Linear(in_features=128, out_features=128) # shape: [N, 128]
-        self.fc3 = nn.Linear(in_features=128, out_features=4) # shape: [N, 128]
-        self.sf_max = nn.Softmax(dim=0)
+        self.fc3 = nn.Linear(in_features=128, out_features=num_particles) # shape: [N, 128]
+        self.sf_max = nn.Softmax(dim=1)
 
     def forward(self, x):
-        #x = self.fc_model(x)
-        #min_obs_likelihood =  0.004
-        #x = x*(1 - min_obs_likelihood) + min_obs_likelihood # is this step required ?
-
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         embedding = x
