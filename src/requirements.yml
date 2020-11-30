@@ -1,0 +1,17 @@
+name: awesome
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - pytorch
+  - torchvision
+  - torchaudio
+  - cudatoolkit=11.0
+  - opencv
+  - tensorboard
+  - pip
+  - pip:
+    - pytorch-metric-learning
+    - transforms3d
+prefix: /home/suresh/miniconda3/envs/awesome
