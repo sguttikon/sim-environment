@@ -10,5 +10,5 @@ conda env create -f requirements.yml
 
 
 #### Other References
-1. refer [pytorch metric learning](https://github.com/KevinMusgrave/pytorch-metric-learning)
-2. https://pypi.org/project/transforms3d/
+1. [pytorch metric learning](https://github.com/KevinMusgrave/pytorch-metric-learning)
+2. [transforms3d](https://pypi.org/project/transforms3d/)
