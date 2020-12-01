@@ -68,6 +68,31 @@ class LikelihoodNetwork(nn.Module):
         x = self.sf_max(x)
         return embedding, x # shape: [N, 4]
 
+class SeqLikeliNetwork(nn.Module):
+    """
+    """
+
+    def __init__(self):
+        super(SeqLikeliNetwork, self).__init__()
+
+        hidden_size = 128
+        num_layers = 2
+        input_size = constants.SEQ_LEN*hidden_size + (constants.NUM_PARTICLES * 4)
+        self.lstm = nn.LSTM(constants.VISUAL_FEATURES, hidden_size, num_layers, batch_first=True) # shape: [N, seq_len, 64]
+        self.linear1 = nn.Linear(input_size, 128) # shape: [N, seq_len*128 + particles*4]
+        self.linear2 = nn.Linear(128, constants.NUM_PARTICLES) # shape: [N, 128]
+        self.soft_max = nn.Softmax(dim=1) # shape: [N, 128]
+
+    def forward(self, imgs, poses):
+        batch_size = imgs.shape[0]
+        lstm_out, _ = self.lstm(imgs)
+        input_features = torch.cat([lstm_out.view(batch_size, -1), poses.view(batch_size, -1)], axis=-1)
+        embedding = self.linear1(input_features)
+        x = F.relu(embedding)
+        x = self.linear2(x)
+        probs = self.soft_max(x)
+        return embedding, probs
+
 class MotionNetwork(nn.Module):
     """
     """

@@ -15,6 +15,7 @@ import cv2
 import os
 from scipy.stats import norm
 from pathlib import Path
+from queue import Queue
 
 np.random.seed(constants.RANDOM_SEED)
 random.seed(constants.RANDOM_SEED)
@@ -36,6 +37,10 @@ vision_net = nets.VisionNetwork(w, h).to(constants.DEVICE)
 likelihood_net = nets.LikelihoodNetwork(num_particles).to(constants.DEVICE)
 measure_params = list(likelihood_net.parameters()) + list(vision_net.parameters())
 measure_optim = torch.optim.Adam(measure_params, lr=2e-4)
+
+seq_likeli_net = nets.SeqLikeliNetwork().to(constants.DEVICE)
+seq_measure_params = list(seq_likeli_net.parameters()) + list(vision_net.parameters())
+seq_measure_optim = torch.optim.Adam(measure_params, lr=2e-4)
 
 def get_motion_data(idx):
     file_name = 'sup_data/rnd_pose_obs_data/data_{:04d}.pkl'.format(idx)
@@ -100,6 +105,30 @@ def get_observation_data(idx):
         observation_data[key] = np.asarray(observation_data[key])[rnd_indices]
     return observation_data
 
+def get_seq_obs_data(idx):
+    file_name = 'sup_data/rnd_pose_obs_data/data_{:04d}.pkl'.format(idx)
+    observation_data = {
+        'obs_pose': [],
+        'obs_rgb': [],
+        'env_map': [],
+    }
+
+    floor_idx = 0
+    model_path = '/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/envs/iGibson/gibson2/dataset/Rs'
+    trav_map = cv2.imread(os.path.join(model_path, 'floor_trav_{0}.png'.format(floor_idx)))
+    env_map = cv2.resize(trav_map, (w, h))
+
+    with open(file_name,'rb') as file:
+        data = pickle.load(file)
+        for eps_data in data:
+            observation_data['obs_pose'].append(eps_data['pose'])
+            observation_data['obs_rgb'].append(eps_data['state']['rgb'])
+            observation_data['env_map'].append(env_map)
+
+    for key in observation_data.keys():
+        observation_data[key] = np.asarray(observation_data[key])
+    return observation_data
+
 def save_motion_model(file_name):
     torch.save({
         'motion_net': motion_net.state_dict(),
@@ -153,28 +182,29 @@ def train_motion_model(use_noise=True, simple_model=False):
             # EVAL
             eval_losses = []
             motion_net.eval()
-            for idx in range(5):
-                rnd_idx = np.random.randint(0, num_data_files)
-                motion_data = get_motion_data(rnd_idx)
-                gt_old_poses = motion_data['start_pose']
-                gt_new_poses = motion_data['end_pose']
-                gt_actions = motion_data['action']
-                gt_delta_t = motion_data['delta_t']
+            with torch.no_grad():
+                for idx in range(5):
+                    rnd_idx = np.random.randint(0, num_data_files)
+                    motion_data = get_motion_data(rnd_idx)
+                    gt_old_poses = motion_data['start_pose']
+                    gt_new_poses = motion_data['end_pose']
+                    gt_actions = motion_data['action']
+                    gt_delta_t = motion_data['delta_t']
 
-                est_new_poses = motion_net(gt_old_poses, gt_actions, gt_delta_t, use_noise, simple_model)
+                    est_new_poses = motion_net(gt_old_poses, gt_actions, gt_delta_t, use_noise, simple_model)
 
-                gt_new_poses = helpers.transform_poses(helpers.to_tensor(gt_new_poses))
-                est_new_poses = helpers.transform_poses(est_new_poses)
+                    gt_new_poses = helpers.transform_poses(helpers.to_tensor(gt_new_poses))
+                    est_new_poses = helpers.transform_poses(est_new_poses)
 
-                loss = loss_fn(est_new_poses, gt_new_poses)
-                writer.add_scalar('motion_eval/mse_loss', loss.item(), eval_idx)
-                eval_idx = eval_idx + 1
-                eval_losses.append(float(loss))
+                    loss = loss_fn(est_new_poses, gt_new_poses)
+                    writer.add_scalar('motion_eval/mse_loss', loss.item(), eval_idx)
+                    eval_idx = eval_idx + 1
+                    eval_losses.append(float(loss))
 
-            if np.mean(eval_losses) < best_acc:
-                print('new best mse loss: {0}'.format(np.mean(eval_losses)))
-                best_acc = np.mean(eval_losses)
-                save_motion_model('best_models/' + file_name.format(0))
+                if np.mean(eval_losses) < best_acc:
+                    print('new best mse loss: {0}'.format(np.mean(eval_losses)))
+                    best_acc = np.mean(eval_losses)
+                    save_motion_model('best_models/' + file_name.format(0))
     writer.close()
 
 def test_motion_model(use_noise=True, simple_model=False):
@@ -229,7 +259,7 @@ def get_triplet_labels(gt_pose, rnd_particles, desc=False):
 
 def get_mse_labels(gt_pose, rnd_particles, mean=0, std=1.0):
     labels = []
-    for b_idx in range(batch_size):
+    for b_idx in range(rnd_particles.shape[0]):
         eucld_dist = helpers.eucld_dist(gt_pose[b_idx], rnd_particles[b_idx])
         label = norm.pdf(helpers.to_numpy(eucld_dist), loc=mean, scale=std)
         label = F.softmax(helpers.to_tensor(label), dim=0)
@@ -330,60 +360,61 @@ def train_measurement_model():
             eval_losses = []
             vision_net.eval()
             likelihood_net.eval()
-            for idx in range(5):
-                rnd_idx = np.random.randint(0, num_data_files)
-                obs_data = get_observation_data(rnd_idx)
-                gt_poses = obs_data['obs_pose']
-                rgbs = obs_data['obs_rgb']
-                env_maps = obs_data['env_map']
+            with torch.no_grad():
+                for idx in range(5):
+                    rnd_idx = np.random.randint(0, num_data_files)
+                    obs_data = get_observation_data(rnd_idx)
+                    gt_poses = obs_data['obs_pose']
+                    rgbs = obs_data['obs_rgb']
+                    env_maps = obs_data['env_map']
 
-                trans_gt_poses = helpers.transform_poses(helpers.to_tensor(gt_poses))
+                    trans_gt_poses = helpers.transform_poses(helpers.to_tensor(gt_poses))
 
-                rnd_particles = get_rnd_particles_data(rnd_idx)
-                arg_poses = np.expand_dims(gt_poses, axis=1) + np.random.normal(loc=0., scale=std, size=rnd_particles.shape)
-                arg_poses[:, 2:3] = helpers.wrap_angle(arg_poses[:, 2:3], use_numpy=True)
-                trans_b_particles = []
-                trans_b_poses = []
-                for b_idx in range(batch_size):
-                    trans_b_particles.append(helpers.transform_poses(helpers.to_tensor(rnd_particles[b_idx])))
-                    trans_b_poses.append(helpers.transform_poses(helpers.to_tensor(arg_poses[b_idx])))
-                trans_rnd_particles = torch.stack(trans_b_particles)
-                trans_arg_poses = torch.stack(trans_b_poses)
+                    rnd_particles = get_rnd_particles_data(rnd_idx)
+                    arg_poses = np.expand_dims(gt_poses, axis=1) + np.random.normal(loc=0., scale=std, size=rnd_particles.shape)
+                    arg_poses[:, 2:3] = helpers.wrap_angle(arg_poses[:, 2:3], use_numpy=True)
+                    trans_b_particles = []
+                    trans_b_poses = []
+                    for b_idx in range(batch_size):
+                        trans_b_particles.append(helpers.transform_poses(helpers.to_tensor(rnd_particles[b_idx])))
+                        trans_b_poses.append(helpers.transform_poses(helpers.to_tensor(arg_poses[b_idx])))
+                    trans_rnd_particles = torch.stack(trans_b_particles)
+                    trans_arg_poses = torch.stack(trans_b_poses)
 
-                # labels = get_mse_labels(trans_gt_poses, trans_rnd_particles)
-                # arg_labels = get_mse_labels(trans_gt_poses, trans_arg_poses)
+                    # labels = get_mse_labels(trans_gt_poses, trans_rnd_particles)
+                    # arg_labels = get_mse_labels(trans_gt_poses, trans_arg_poses)
 
-                trans_rnd_particles = torch.flatten(trans_rnd_particles, start_dim=1, end_dim=-1)
-                trans_arg_poses = torch.flatten(trans_arg_poses, start_dim=1, end_dim=-1)
+                    trans_rnd_particles = torch.flatten(trans_rnd_particles, start_dim=1, end_dim=-1)
+                    trans_arg_poses = torch.flatten(trans_arg_poses, start_dim=1, end_dim=-1)
 
-                imgs = np.concatenate([rgbs, env_maps], axis=-1)
-                imgs = helpers.to_tensor(imgs).permute(0, 3, 1, 2) # from NHWC to NCHW
-                encoded_imgs = vision_net(imgs)
+                    imgs = np.concatenate([rgbs, env_maps], axis=-1)
+                    imgs = helpers.to_tensor(imgs).permute(0, 3, 1, 2) # from NHWC to NCHW
+                    encoded_imgs = vision_net(imgs)
 
-                input_features = torch.cat([encoded_imgs, trans_rnd_particles], axis=-1)
-                embeddings, likelihoods = likelihood_net(input_features)
-                labels = torch.arange(embeddings.size(0))
+                    input_features = torch.cat([encoded_imgs, trans_rnd_particles], axis=-1)
+                    embeddings, likelihoods = likelihood_net(input_features)
+                    labels = torch.arange(embeddings.size(0))
 
-                input_features = torch.cat([encoded_imgs, trans_arg_poses], axis=-1)
-                augmented, arg_likelihoods = likelihood_net(input_features)
+                    input_features = torch.cat([encoded_imgs, trans_arg_poses], axis=-1)
+                    augmented, arg_likelihoods = likelihood_net(input_features)
 
-                embeddings = torch.cat([embeddings, augmented], dim=0)
-                labels = torch.cat([labels, labels], dim=0)
-                loss = loss_fn(embeddings, labels)
-                writer.add_scalar('measurement_eval/triplet_loss', loss.item(), eval_idx)
+                    embeddings = torch.cat([embeddings, augmented], dim=0)
+                    labels = torch.cat([labels, labels], dim=0)
+                    loss = loss_fn(embeddings, labels)
+                    writer.add_scalar('measurement_eval/triplet_loss', loss.item(), eval_idx)
 
-                # likelihoods = torch.cat([likelihoods, arg_likelihoods], dim=0)
-                # labels = torch.cat([labels, arg_labels], dim=0)
-                # loss = loss_fn(likelihoods, labels)
-                # writer.add_scalar('measurement_eval/mse_loss', loss.item(), eval_idx)
+                    # likelihoods = torch.cat([likelihoods, arg_likelihoods], dim=0)
+                    # labels = torch.cat([labels, arg_labels], dim=0)
+                    # loss = loss_fn(likelihoods, labels)
+                    # writer.add_scalar('measurement_eval/mse_loss', loss.item(), eval_idx)
 
-                eval_idx = eval_idx + 1
-                eval_losses.append(float(loss))
+                    eval_idx = eval_idx + 1
+                    eval_losses.append(float(loss))
 
-            if np.mean(eval_losses) < best_acc:
-                print('new best loss: {0}'.format(np.mean(eval_losses)))
-                best_acc = np.mean(eval_losses)
-                save_measurement_model('best_models/' + file_name.format(0))
+                if np.mean(eval_losses) < best_acc:
+                    print('new best loss: {0}'.format(np.mean(eval_losses)))
+                    best_acc = np.mean(eval_losses)
+                    save_measurement_model('best_models/' + file_name.format(0))
     writer.close()
 
 def test_measurement_model():
@@ -519,6 +550,141 @@ def plot_est_trajectory(idx, use_learned, use_noise, simple_model):
             est_old_poses = est_new_poses
     writer.close()
 
+def save_seq_measure_model(file_name):
+    torch.save({
+        'vision_net': vision_net.state_dict(),
+        'likelihood_net': seq_likeli_net.state_dict(),
+        'optimizer': seq_measure_optim.state_dict(),
+    }, file_name)
+
+def train_seq_measure_model():
+    file_name = 'seq_measure_model_mse_{0}.pt'
+
+    writer = SummaryWriter()
+    loss_fn = nn.MSELoss()
+
+    num_epochs = 1000
+    num_data_files = 25
+    seq_len = constants.SEQ_LEN
+    train_idx = 0
+    eval_idx = 0
+    best_acc = np.inf
+
+    for epoch in range(num_epochs):
+        # TRAIN
+        train_losses = []
+        vision_net.train()
+        seq_likeli_net.train()
+        for file_idx in range(num_data_files):
+            obs_data = get_seq_obs_data(file_idx)
+            gt_poses = obs_data['obs_pose']
+            rgbs = obs_data['obs_rgb']
+            env_maps = obs_data['env_map']
+
+            imgs = np.concatenate([rgbs, env_maps], axis=-1)
+            imgs = helpers.to_tensor(imgs).permute(0, 3, 1, 2) # from NHWC to NCHW
+            encoded_imgs = vision_net(imgs)
+
+            encodings_queue = Queue(maxsize = seq_len)
+            for _ in range(seq_len):
+                encodings_queue.put(encoded_imgs[0])
+
+            trans_gt_poses = helpers.transform_poses(helpers.to_tensor(gt_poses))
+            std = 0.55
+            seq_losses = 0
+            for idx in range(encoded_imgs.shape[0]):
+                encodings_queue.get()
+                encodings_queue.put(encoded_imgs[idx]) # current img encoding
+                seq_img_encodings = torch.stack(list(encodings_queue.queue)).unsqueeze(0)
+
+                if idx%10 == 0:
+                    std = std - 0.05 # decrement
+                arg_gt_poses = gt_poses[idx] + \
+                                np.random.normal(loc=0., scale=std, \
+                                            size=(constants.NUM_PARTICLES,
+                                                  constants.STATE_DIMS))
+                arg_gt_poses[:, 2:3] = helpers.wrap_angle(arg_gt_poses[:, 2:3], use_numpy=True)
+                trans_arg_gt_poses = helpers.transform_poses(helpers.to_tensor(arg_gt_poses)).unsqueeze(0)
+                arg_gt_labels = get_mse_labels(trans_gt_poses[idx].unsqueeze(0), trans_arg_gt_poses, 0, std)
+
+                embeddings, likelihoods = seq_likeli_net(seq_img_encodings, trans_arg_gt_poses)
+
+                loss = loss_fn(likelihoods, arg_gt_labels)
+                seq_losses = seq_losses + loss
+
+            seq_measure_optim.zero_grad()
+            seq_losses.backward()
+            seq_measure_optim.step()
+
+            writer.add_scalar('seq_measure_train/mse_loss', seq_losses.item(), train_idx)
+            train_idx = train_idx + 1
+
+            train_losses.append(float(seq_losses))
+        print('mean loss: {0}'.format(np.mean(train_losses)))
+
+        if epoch%50 == 0:
+            save_seq_measure_model('saved_models/' + file_name.format(epoch))
+
+            # EVAL
+            eval_losses = []
+            vision_net.eval()
+            seq_likeli_net.eval()
+
+            with torch.no_grad():
+                for idx in range(5):
+                    rnd_idx = np.random.randint(0, num_data_files)
+                    obs_data = get_seq_obs_data(rnd_idx)
+                    gt_poses = obs_data['obs_pose']
+                    rgbs = obs_data['obs_rgb']
+                    env_maps = obs_data['env_map']
+
+                    imgs = np.concatenate([rgbs, env_maps], axis=-1)
+                    imgs = helpers.to_tensor(imgs).permute(0, 3, 1, 2) # from NHWC to NCHW
+                    encoded_imgs = vision_net(imgs)
+
+                    encodings_queue = Queue(maxsize = seq_len)
+                    for _ in range(seq_len):
+                        encodings_queue.put(encoded_imgs[0])
+
+                    trans_gt_poses = helpers.transform_poses(helpers.to_tensor(gt_poses))
+                    std = 0.55
+                    seq_losses = 0
+                    for idx in range(encoded_imgs.shape[0]):
+                        encodings_queue.get()
+                        encodings_queue.put(encoded_imgs[idx]) # current img encoding
+                        seq_img_encodings = torch.stack(list(encodings_queue.queue)).unsqueeze(0)
+
+                        if idx%10 == 0:
+                            std = std - 0.05 # decrement
+                        arg_gt_poses = gt_poses[idx] + \
+                                        np.random.normal(loc=0., scale=std, \
+                                                    size=(constants.NUM_PARTICLES,
+                                                          constants.STATE_DIMS))
+                        arg_gt_poses[:, 2:3] = helpers.wrap_angle(arg_gt_poses[:, 2:3], use_numpy=True)
+                        trans_arg_gt_poses = helpers.transform_poses(helpers.to_tensor(arg_gt_poses)).unsqueeze(0)
+                        arg_gt_labels = get_mse_labels(trans_gt_poses[idx].unsqueeze(0), trans_arg_gt_poses, 0, std)
+
+                        embeddings, likelihoods = seq_likeli_net(seq_img_encodings, trans_arg_gt_poses)
+
+                        loss = loss_fn(likelihoods, arg_gt_labels)
+                        seq_losses = seq_losses + loss
+
+                    eval_losses.append(float(seq_losses))
+                    writer.add_scalar('seq_measure_eval/mse_loss', seq_losses.item(), eval_idx)
+                    eval_idx = eval_idx + 1
+
+                if np.mean(eval_losses) < best_acc:
+                    print('new best loss: {0}'.format(np.mean(eval_losses)))
+                    best_acc = np.mean(eval_losses)
+                    save_seq_measure_model('best_models/' + file_name.format(0))
+    writer.close()
+
+def test_seq_measure_model():
+    file_name = 'seq_measure_model_mse.pt'
+    checkpoint = torch.load(file_name)
+    vision_net.load_state_dict(checkpoint['vision_net'])
+    seq_likeli_net.load_state_dict(checkpoint['likelihood_net'])
+
 if __name__ == '__main__':
     print('motion model')
     # train_motion_model(simple_model=False)
@@ -537,5 +703,9 @@ if __name__ == '__main__':
     # plot_est_trajectory(rnd_idx, use_learned=True, use_noise=True, simple_model=True)
 
     print('measurement model')
-    #train_measurement_model()
-    test_measurement_model()
+    # train_measurement_model()
+    # test_measurement_model()
+
+    print('seq measure model')
+    train_seq_measure_model()
+    # test_seq_measure_model()
