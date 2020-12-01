@@ -81,7 +81,7 @@ class SeqLikeliNetwork(nn.Module):
         self.lstm = nn.LSTM(constants.VISUAL_FEATURES, hidden_size, num_layers, batch_first=True) # shape: [N, seq_len, 64]
         self.linear1 = nn.Linear(input_size, 128) # shape: [N, seq_len*128 + particles*4]
         self.linear2 = nn.Linear(128, constants.NUM_PARTICLES) # shape: [N, 128]
-        self.soft_max = nn.Softmax(dim=1) # shape: [N, 128]
+        self.soft_max = nn.Softmax(dim=1) # shape: [N, particles]
 
     def forward(self, imgs, poses):
         batch_size = imgs.shape[0]

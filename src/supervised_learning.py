@@ -174,7 +174,7 @@ def train_motion_model(use_noise=True, simple_model=False):
             writer.add_scalar('motion_train/mse_loss', loss.item(), train_idx)
             train_idx = train_idx + 1
             train_losses.append(float(loss))
-        print('mean mse loss: {0}'.format(np.mean(train_losses)))
+        print('mean mse loss: {0:4f}'.format(np.mean(train_losses)))
 
         if j%50 == 0:
             save_motion_model('saved_models/' + file_name.format(j))
@@ -202,7 +202,7 @@ def train_motion_model(use_noise=True, simple_model=False):
                     eval_losses.append(float(loss))
 
                 if np.mean(eval_losses) < best_acc:
-                    print('new best mse loss: {0}'.format(np.mean(eval_losses)))
+                    print('new best mse loss: {0:4f}'.format(np.mean(eval_losses)))
                     best_acc = np.mean(eval_losses)
                     save_motion_model('best_models/' + file_name.format(0))
     writer.close()
@@ -237,7 +237,7 @@ def test_motion_model(use_noise=True, simple_model=False):
 
             loss = loss_fn(est_new_poses, gt_new_poses)
             losses.append(float(loss))
-        print('mean mse loss: {0}'.format(np.mean(losses)))
+        print('mean mse loss: {0:4f}'.format(np.mean(losses)))
 
 def compute_labels(gt_poses, rnd_particles):
     particles_batch = []
@@ -264,7 +264,7 @@ def get_mse_labels(gt_pose, rnd_particles, mean=0, std=1.0):
         label = norm.pdf(helpers.to_numpy(eucld_dist), loc=mean, scale=std)
         label = F.softmax(helpers.to_tensor(label), dim=0)
         labels.append(label)
-    return torch.stack(labels)
+    return torch.stack(labels).detach()
 
 def get_mse_loss(gt_pose, rnd_particles, std=0.5):
     sqrt_dist = helpers.eucld_dist(gt_pose, rnd_particles)
@@ -351,7 +351,7 @@ def train_measurement_model():
 
             train_idx = train_idx + 1
             train_losses.append(float(loss))
-        print('mean loss: {0}'.format(np.mean(train_losses)))
+        print('mean loss: {0:4f}'.format(np.mean(train_losses)))
 
         if j%50 == 0:
             save_measurement_model('saved_models/' + file_name.format(j))
@@ -412,7 +412,7 @@ def train_measurement_model():
                     eval_losses.append(float(loss))
 
                 if np.mean(eval_losses) < best_acc:
-                    print('new best loss: {0}'.format(np.mean(eval_losses)))
+                    print('new best loss: {0:4f}'.format(np.mean(eval_losses)))
                     best_acc = np.mean(eval_losses)
                     save_measurement_model('best_models/' + file_name.format(0))
     writer.close()
@@ -477,7 +477,7 @@ def test_measurement_model():
             print(torch.sum(likelihoods[0][indices]), labels[0][indices])
             loss = loss_fn(likelihoods, labels)
             losses.append(float(loss))
-        print('mean loss: {0}'.format(np.mean(losses)))
+        print('mean loss: {0:4f}'.format(np.mean(losses)))
 
 def plot_gt_trajectory(idx):
     file_name = 'sup_data/rnd_pose_obs_data/data_{:04d}.pkl'.format(idx)
@@ -620,7 +620,7 @@ def train_seq_measure_model():
             train_idx = train_idx + 1
 
             train_losses.append(float(seq_losses))
-        print('mean loss: {0}'.format(np.mean(train_losses)))
+        print('mean loss: {0:4f}'.format(np.mean(train_losses)))
 
         if epoch%50 == 0:
             save_seq_measure_model('saved_models/' + file_name.format(epoch))
@@ -674,7 +674,7 @@ def train_seq_measure_model():
                     eval_idx = eval_idx + 1
 
                 if np.mean(eval_losses) < best_acc:
-                    print('new best loss: {0}'.format(np.mean(eval_losses)))
+                    print('new best loss: {0:4f}'.format(np.mean(eval_losses)))
                     best_acc = np.mean(eval_losses)
                     save_seq_measure_model('best_models/' + file_name.format(0))
     writer.close()
@@ -684,6 +684,55 @@ def test_seq_measure_model():
     checkpoint = torch.load(file_name)
     vision_net.load_state_dict(checkpoint['vision_net'])
     seq_likeli_net.load_state_dict(checkpoint['likelihood_net'])
+
+    loss_fn = nn.MSELoss()
+
+    num_data_files = 25
+    seq_len = constants.SEQ_LEN
+
+    vision_net.eval()
+    seq_likeli_net.eval()
+
+    with torch.no_grad():
+        for idx in range(1):
+            rnd_idx = np.random.randint(0, num_data_files)
+            obs_data = get_seq_obs_data(rnd_idx)
+            gt_poses = obs_data['obs_pose']
+            rgbs = obs_data['obs_rgb']
+            env_maps = obs_data['env_map']
+
+            imgs = np.concatenate([rgbs, env_maps], axis=-1)
+            imgs = helpers.to_tensor(imgs).permute(0, 3, 1, 2) # from NHWC to NCHW
+            encoded_imgs = vision_net(imgs)
+
+            encodings_queue = Queue(maxsize = seq_len)
+            for _ in range(seq_len):
+                encodings_queue.put(encoded_imgs[0])
+
+            trans_gt_poses = helpers.transform_poses(helpers.to_tensor(gt_poses))
+            std = 0.55
+            seq_losses = 0
+            for idx in range(encoded_imgs.shape[0]):
+                encodings_queue.get()
+                encodings_queue.put(encoded_imgs[idx]) # current img encoding
+                seq_img_encodings = torch.stack(list(encodings_queue.queue)).unsqueeze(0)
+
+                if idx%10 == 0:
+                    std = std - 0.05 # decrement
+                arg_gt_poses = gt_poses[idx] + \
+                                np.random.normal(loc=0., scale=std, \
+                                            size=(constants.NUM_PARTICLES,
+                                                  constants.STATE_DIMS))
+                arg_gt_poses[:, 2:3] = helpers.wrap_angle(arg_gt_poses[:, 2:3], use_numpy=True)
+                trans_arg_gt_poses = helpers.transform_poses(helpers.to_tensor(arg_gt_poses)).unsqueeze(0)
+                arg_gt_labels = get_mse_labels(trans_gt_poses[idx].unsqueeze(0), trans_arg_gt_poses, 0, std)
+
+                embeddings, likelihoods = seq_likeli_net(seq_img_encodings, trans_arg_gt_poses)
+
+                loss = loss_fn(likelihoods[0, 0], arg_gt_labels[0, 0])
+                seq_losses = seq_losses + loss
+
+            print('mean loss: {0:4f}'.format(float(seq_losses)))
 
 if __name__ == '__main__':
     print('motion model')
@@ -707,5 +756,5 @@ if __name__ == '__main__':
     # test_measurement_model()
 
     print('seq measure model')
-    train_seq_measure_model()
-    # test_seq_measure_model()
+    # train_seq_measure_model()
+    test_seq_measure_model()
