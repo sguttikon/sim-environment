@@ -38,7 +38,7 @@ class Measurement(object):
 
         self.best_eval_accuracy = np.inf
 
-        self.num_data_files = 75
+        self.num_data_files = 25
 
     def get_obs_data_loader(self, file_idx):
         obs_file_name = 'sup_data/rnd_pose_obs_data/data_{:04d}.pkl'.format(file_idx)
@@ -71,8 +71,8 @@ class Measurement(object):
         self.feature_extractor.eval()
 
     def train(self, train_epochs=1, eval_epochs=1):
-        eval_epoch = 25
-        save_epoch = 50
+        eval_epoch = 5
+        save_epoch = 10
 
         # iterate per epoch
         for epoch in range(train_epochs):
@@ -105,29 +105,29 @@ class Measurement(object):
                     features = self.feature_extractor(batch_rgbs)
 
                     # approach [p, img + 4]
-                    img_features = features['avgpool'].view(constants.BATCH_SIZE, 1, -1)
+                    img_features = features['avgpool'].view(batch_rgbs.shape[0], 1, -1)
                     repeat_img_features = img_features.repeat(1, batch_gt_particles.shape[1], 1)
 
-                    input_est_features = torch.cat([trans_batch_est_particles, repeat_img_features], axis=-1).squeeze()
-                    input_gt_features = torch.cat([trans_batch_gt_particles, repeat_img_features], axis=-1).squeeze()
+                    # input_est_features = torch.cat([trans_batch_est_particles, repeat_img_features], axis=-1).squeeze()
+                    # est_embeddings, est_likelihoods = self.likelihood_net(input_est_features)
 
+                    input_gt_features = torch.cat([trans_batch_gt_particles, repeat_img_features], axis=-1).squeeze()
                     gt_embeddings, gt_likelihoods = self.likelihood_net(input_gt_features)
-                    est_embeddings, est_likelihoods = self.likelihood_net(input_est_features)
 
                     if self.loss_fn_name == 'mse':
-                        likelihoods = torch.cat([gt_likelihoods, est_likelihoods], dim=0).squeeze()
-                        labels = torch.cat([batch_gt_labels, batch_est_labels], dim=0)
-                        loss = self.loss_fn(likelihoods, labels)
+                        # likelihoods = torch.cat([gt_likelihoods, est_likelihoods], dim=0)
+                        # labels = torch.cat([batch_gt_labels, batch_est_labels], dim=0)
+                        loss = self.loss_fn(gt_likelihoods.squeeze(), batch_gt_labels)
 
                     loss.backward()
                     self.optimizer.step()
 
-                    batch_loss = batch_loss + float(loss)
+                    batch_loss = batch_loss + loss
 
                 # log
-                self.writer.add_scalar('training/{}_b_loss'.format(self.loss_fn_name), batch_loss, self.train_idx)
+                self.writer.add_scalar('training/{}_b_loss'.format(self.loss_fn_name), batch_loss.item(), self.train_idx)
                 self.train_idx = self.train_idx + 1
-                training_loss.append(batch_loss)
+                training_loss.append(float(batch_loss))
 
             #
             print('mean loss: {0:4f}'.format(np.mean(training_loss)))
@@ -143,7 +143,7 @@ class Measurement(object):
         self.writer.close()
 
     def eval(self, num_epochs=1):
-
+        rnd_files = 5
         total_loss = 0
         # iterate per epoch
         for epoch in range(num_epochs):
@@ -151,8 +151,9 @@ class Measurement(object):
             self.set_eval_mode()
             evaluation_loss = []
 
+            rnd_indices = np.random.randint(0, self.num_data_files, size=rnd_files)
             # iterate per pickle data file
-            for file_idx in range(self.num_data_files):
+            for file_idx in rnd_indices:
                 obs_data_loader = self.get_obs_data_loader(file_idx)
 
                 # iterate per batch
@@ -175,26 +176,26 @@ class Measurement(object):
                         features = self.feature_extractor(batch_rgbs)
 
                         # approach [p, img + 4]
-                        img_features = features['avgpool'].view(constants.BATCH_SIZE, 1, -1)
+                        img_features = features['avgpool'].view(batch_rgbs.shape[0], 1, -1)
                         repeat_img_features = img_features.repeat(1, batch_gt_particles.shape[1], 1)
 
-                        input_est_features = torch.cat([trans_batch_est_particles, repeat_img_features], axis=-1).squeeze()
-                        input_gt_features = torch.cat([trans_batch_gt_particles, repeat_img_features], axis=-1).squeeze()
+                        # input_est_features = torch.cat([trans_batch_est_particles, repeat_img_features], axis=-1).squeeze()
+                        # est_embeddings, est_likelihoods = self.likelihood_net(input_est_features)
 
+                        input_gt_features = torch.cat([trans_batch_gt_particles, repeat_img_features], axis=-1).squeeze()
                         gt_embeddings, gt_likelihoods = self.likelihood_net(input_gt_features)
-                        est_embeddings, est_likelihoods = self.likelihood_net(input_est_features)
 
                         if self.loss_fn_name == 'mse':
-                            likelihoods = torch.cat([gt_likelihoods, est_likelihoods], dim=0).squeeze()
-                            labels = torch.cat([batch_gt_labels, batch_est_labels], dim=0)
-                            loss = self.loss_fn(likelihoods, labels)
+                            # likelihoods = torch.cat([gt_likelihoods, est_likelihoods], dim=0)
+                            # labels = torch.cat([batch_gt_labels, batch_est_labels], dim=0)
+                            loss = self.loss_fn(gt_likelihoods.squeeze(), batch_gt_labels)
 
-                        batch_loss = batch_loss + float(loss)
+                        batch_loss = batch_loss + loss
 
                     # log
-                    self.writer.add_scalar('training/{}_b_loss'.format(self.loss_fn_name), batch_loss, self.train_idx)
+                    self.writer.add_scalar('evaluation/{}_b_loss'.format(self.loss_fn_name), batch_loss.item(), self.eval_idx)
                     self.eval_idx = self.eval_idx + 1
-                    evaluation_loss.append(batch_loss)
+                    evaluation_loss.append(float(batch_loss))
 
             total_loss = total_loss + np.mean(evaluation_loss)
 
@@ -208,6 +209,30 @@ class Measurement(object):
     def test(self, file_name):
         self.load(file_name)
         self.set_eval_mode()
+
+        rnd_idx = np.random.randint(0, self.num_data_files)
+        obs_data_loader = self.get_obs_data_loader(rnd_idx)
+        with torch.no_grad():
+            for _, batch_samples in enumerate(obs_data_loader):
+                # get data
+                batch_rgbs = batch_samples['state']['rgb'].to(constants.DEVICE)
+                batch_gt_poses = batch_samples['pose'].to(constants.DEVICE)
+                batch_gt_particles = batch_samples['gt_particles'].to(constants.DEVICE)
+                batch_gt_labels = batch_samples['gt_labels'].to(constants.DEVICE).squeeze()
+                batch_est_particles = batch_samples['est_particles'].to(constants.DEVICE)
+                batch_est_labels = batch_samples['est_labels'].to(constants.DEVICE).squeeze()
+
+                trans_batch_gt_poses = helpers.transform_poses(batch_gt_poses)
+
+                # get encoded image features
+                features = self.feature_extractor(batch_rgbs)
+
+                # approach [p, img + 4]
+                img_features = features['avgpool'].view(constants.BATCH_SIZE, 1, -1)
+
+                input_gt_features = torch.cat([trans_batch_gt_poses, img_features], axis=-1).squeeze()
+                gt_embeddings, gt_likelihoods = self.likelihood_net(input_gt_features)
+                print(gt_likelihoods)
 
     def save(self, file_name):
         torch.save({
@@ -226,6 +251,7 @@ if __name__ == '__main__':
     measurement = Measurement()
     train_epochs=1
     eval_epochs=1
-    measurement.train(train_epochs, eval_epochs)
-    file_name = 'best_models/likelihood_mse_best.pth'
+    # measurement.train(train_epochs, eval_epochs)
+    measurement.eval(eval_epochs)
+    file_name = 'likelihood_mse_best.pth'
     measurement.test(file_name)

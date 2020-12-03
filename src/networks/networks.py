@@ -81,9 +81,9 @@ class LikelihoodNetwork(nn.Module):
         self.out_features = 1
 
         # model
-        self.fc1 = nn.Linear(in_features=self.in_features, out_features=256) # shape: [N, self.in_features]
-        self.fc2 = nn.Linear(in_features=256, out_features=256) # shape: [N, 256]
-        self.fc3 = nn.Linear(in_features=256, out_features=self.out_features) # shape: [N, 256]
+        self.fc1 = nn.Linear(in_features=self.in_features, out_features=1024) # shape: [N, self.in_features]
+        self.fc2 = nn.Linear(in_features=1024, out_features=1024) # shape: [N, 1024]
+        self.fc3 = nn.Linear(in_features=1024, out_features=self.out_features) # shape: [N, 1024]
 
     def forward(self, x):
         x = F.relu(self.fc1(x))

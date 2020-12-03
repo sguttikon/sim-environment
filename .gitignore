@@ -3,3 +3,4 @@ bckp
 *.pkl
 events*
 *.pt
+*.pth
