@@ -6,21 +6,27 @@ import torch
 import numpy as np
 from torch import nn
 from torch.utils.data import Dataset
-from torchvision import transforms, models
+from torchvision import transforms
 from skimage import io, transform
 from skimage.color import gray2rgb
+import utils.constants as constants
+import utils.helpers as helpers
+from scipy.stats import norm
 
 class ObservationDataset(Dataset):
     """
     reference: https://pytorch.org/tutorials/beginner/data_loading_tutorial.html
     """
 
-    def __init__(self, pkl_file, transform=None):
+    def __init__(self, obs_pkl_file, particles_pkl_file, transform=None):
         """
         """
         self.transform = transform
-        with open(pkl_file,'rb') as file:
-            self.pkl_data = pickle.load(file)
+        with open(obs_pkl_file,'rb') as file:
+            self.obs_pkl_data = pickle.load(file)
+
+        with open(particles_pkl_file,'rb') as file:
+            self.particles_pkl_data = pickle.load(file)
 
         floor_idx = 0
         model_path = '/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/envs/iGibson/gibson2/dataset/Rs'
@@ -28,14 +34,35 @@ class ObservationDataset(Dataset):
         self.env_map = io.imread(img_name)
 
     def __len__(self):
-        return len(self.pkl_data)
+        return len(self.obs_pkl_data)
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        sample = self.pkl_data[idx]
+        sample = self.obs_pkl_data[idx]
         sample['env_map'] = gray2rgb(self.env_map)
+
+        std = 0.5
+        gt_pose = sample['pose']
+        gt_pose = np.expand_dims(gt_pose, axis=0)
+
+        # add estimated particles
+        sample['est_particles'] = self.particles_pkl_data
+
+        eucld_dist = helpers.eucld_dist(gt_pose, sample['est_particles'], use_numpy=True)
+        sample['est_labels'] = norm.pdf(eucld_dist, loc=0, scale=std).squeeze()
+
+        # add gaussian particles around gt pose
+        shape = sample['est_particles'].shape
+        gt_particles = np.random.normal(loc=gt_pose, scale=std, size=shape)
+        gt_particles[:, 2:3] = helpers.wrap_angle(gt_particles[:, 2:3], use_numpy=True) # wrap angle
+        sample['gt_particles'] = gt_particles
+
+        eucld_dist = helpers.eucld_dist(gt_pose, sample['gt_particles'], use_numpy=True)
+        sample['gt_labels'] = norm.pdf(eucld_dist, loc=0, scale=std).squeeze()
+
+        sample['pose'] = gt_pose
 
         if self.transform:
             sample = self.transform(sample)
@@ -120,18 +147,34 @@ class ToTensor(object):
     def __call__(self, sample):
         rgb_img = sample['state']['rgb']
         env_map = sample['env_map']
+        pose = sample['pose']
+        gt_particles = sample['gt_particles']
+        gt_labels = sample['gt_labels']
+        est_particles = sample['est_particles']
+        est_labels = sample['est_labels']
 
         # swap color axis because
         # numpy image: H x W x C
         # torch image: C x H x W
         rgb_img = rgb_img.transpose((2, 0, 1))
-        new_rgb_img = torch.from_numpy(rgb_img)
+        new_rgb_img = torch.from_numpy(rgb_img).float()
 
         env_map = env_map.transpose((2, 0, 1))
-        new_env_map = torch.from_numpy(env_map)
+        new_env_map = torch.from_numpy(env_map).float()
+
+        new_pose = torch.from_numpy(pose).float()
+        new_gt_particles = torch.from_numpy(gt_particles).float()
+        new_gt_labels = torch.from_numpy(gt_labels).float()
+        new_est_particles = torch.from_numpy(est_particles).float()
+        new_est_labels = torch.from_numpy(est_labels).float()
 
         sample['state']['rgb'] = new_rgb_img
         sample['env_map'] = new_env_map
+        sample['pose'] = new_pose
+        sample['gt_particles'] = new_gt_particles
+        sample['gt_labels'] = new_gt_labels
+        sample['est_particles'] = new_est_particles
+        sample['est_labels'] = new_est_labels
 
         return sample
 

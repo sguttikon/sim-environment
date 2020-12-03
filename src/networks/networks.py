@@ -75,23 +75,22 @@ class LikelihoodNetwork(nn.Module):
     """
     """
 
-    def __init__(self, num_particles):
+    def __init__(self):
         super(LikelihoodNetwork, self).__init__()
-        self.in_features = constants.VISUAL_FEATURES + num_particles * 4
+        self.in_features = constants.VISUAL_FEATURES + 4
+        self.out_features = 1
 
         # model
-        self.fc1 = nn.Linear(in_features=self.in_features, out_features=128) # shape: [N, 68]
-        self.fc2 = nn.Linear(in_features=128, out_features=128) # shape: [N, 128]
-        self.fc3 = nn.Linear(in_features=128, out_features=num_particles) # shape: [N, 128]
-        self.sf_max = nn.Softmax(dim=1)
+        self.fc1 = nn.Linear(in_features=self.in_features, out_features=256) # shape: [N, self.in_features]
+        self.fc2 = nn.Linear(in_features=256, out_features=256) # shape: [N, 256]
+        self.fc3 = nn.Linear(in_features=256, out_features=self.out_features) # shape: [N, 256]
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         embedding = x
         x = self.fc3(x)
-        x = self.sf_max(x)
-        return embedding, x # shape: [N, 4]
+        return embedding, x # shape: [N, self.out_features]
 
 class SeqLikeliNetwork(nn.Module):
     """

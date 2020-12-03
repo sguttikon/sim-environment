@@ -46,8 +46,11 @@ def eucld_dist(pose1, pose2, use_numpy=False):
             return np.linalg.norm(diff)
         else:
             return torch.norm(diff)
-    else:
-        return torch.norm(diff, dim=1)
+    if len(diff.shape) == 2:
+        if use_numpy:
+            return np.linalg.norm(diff, axis=1, keepdims=True)
+        else:
+            return torch.norm(diff, dim=1, keepdim=True)
 
 def motion_model_velocity(new_pose, vel_cmd, old_pose):
     x, y, theta = old_pose
@@ -111,13 +114,28 @@ def sample_motion_model_velocity(vel_cmd, old_pose, delta_t=1., use_noise=False)
 
 def transform_poses(poses):
     if len(poses.shape) == 1:
-        return torch.cat([
-            poses[0:2], torch.cos(poses[2:3]), torch.sin(poses[2:3])
-        ], axis=-1)
-    else:
-        return torch.cat([
-            poses[:, 0:2], torch.cos(poses[:, 2:3]), torch.sin(poses[:, 2:3])
-        ], axis=-1)
+        transformed_poses = torch.cat([
+                        poses[0:2],
+                        torch.cos(poses[2:3]),
+                        torch.sin(poses[2:3])
+                    ], axis=-1)
+    elif len(poses.shape) == 2:
+        transformed_poses = torch.cat([
+                        poses[:, 0:2],
+                        torch.cos(poses[:, 2:3]),
+                        torch.sin(poses[:, 2:3])
+                    ], axis=-1)
+    elif len(poses.shape) == 3:
+        trans_b_poses = []
+        for b_idx in range(poses.shape[0]):
+            trans_pose = torch.cat([
+                        poses[b_idx][:, 0:2],
+                        torch.cos(poses[b_idx][:, 2:3]),
+                        torch.sin(poses[b_idx][:, 2:3])
+                    ], axis=-1)
+            trans_b_poses.append(trans_pose)
+        transformed_poses = torch.stack(trans_b_poses)
+    return transformed_poses
 
 def get_triplet_labels(gt_pose, particles, desc=False):
     dist = eucld_dist(gt_pose, particles)
