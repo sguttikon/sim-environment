@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
 
+import sys
+def set_path(path: str):
+    try:
+        sys.path.index(path)
+    except ValueError:
+        sys.path.insert(0, path)
+
+# set programatically the path to 'openai_ros' directory (alternately can also set PYTHONPATH)
+set_path('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src')
+
 import pickle
 import numpy as np
 import torch
@@ -16,6 +26,7 @@ import os
 from scipy.stats import norm
 from pathlib import Path
 from queue import Queue
+import measurement as m
 
 np.random.seed(constants.RANDOM_SEED)
 random.seed(constants.RANDOM_SEED)
@@ -34,7 +45,7 @@ motion_params = list(motion_net.parameters())
 motion_optim = torch.optim.Adam(motion_params, lr=2e-4)
 
 vision_net = nets.VisionNetwork(w, h).to(constants.DEVICE)
-likelihood_net = nets.LikelihoodNetwork(num_particles).to(constants.DEVICE)
+likelihood_net = nets.LikelihoodNetwork().to(constants.DEVICE)
 measure_params = list(likelihood_net.parameters()) + list(vision_net.parameters())
 measure_optim = torch.optim.Adam(measure_params, lr=2e-4)
 
@@ -754,7 +765,11 @@ if __name__ == '__main__':
     print('measurement model')
     # train_measurement_model()
     # test_measurement_model()
+    measurement = m.Measurement()
+    train_epochs = 500
+    eval_epochs = 5
+    measurement.train(train_epochs, eval_epochs)
 
     print('seq measure model')
     # train_seq_measure_model()
-    test_seq_measure_model()
+    # test_seq_measure_model()

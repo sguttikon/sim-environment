@@ -41,8 +41,8 @@ class Measurement(object):
         self.num_data_files = 25
 
     def get_obs_data_loader(self, file_idx):
-        obs_file_name = 'sup_data/rnd_pose_obs_data/data_{:04d}.pkl'.format(file_idx)
-        particles_file_name = 'sup_data/rnd_particles_data/particles_{:04d}.pkl'.format(file_idx)
+        obs_file_name = 'igibson_data/rnd_pose_obs_data/data_{:04d}.pkl'.format(file_idx)
+        particles_file_name = 'igibson_data/rnd_particles_data/particles_{:04d}.pkl'.format(file_idx)
 
         # reference https://pytorch.org/docs/stable/torchvision/models.html
         composed = transforms.Compose([
@@ -228,11 +228,11 @@ class Measurement(object):
                 features = self.feature_extractor(batch_rgbs)
 
                 # approach [p, img + 4]
-                img_features = features['avgpool'].view(constants.BATCH_SIZE, 1, -1)
+                img_features = features['avgpool'].view(batch_rgbs.shape[0], 1, -1)
 
                 input_gt_features = torch.cat([trans_batch_gt_poses, img_features], axis=-1).squeeze()
                 gt_embeddings, gt_likelihoods = self.likelihood_net(input_gt_features)
-                print(gt_likelihoods)
+                print(gt_likelihoods.squeeze())
 
     def save(self, file_name):
         torch.save({
@@ -252,6 +252,6 @@ if __name__ == '__main__':
     train_epochs=1
     eval_epochs=1
     # measurement.train(train_epochs, eval_epochs)
-    measurement.eval(eval_epochs)
+    # measurement.eval(eval_epochs)
     file_name = 'likelihood_mse_best.pth'
     measurement.test(file_name)
