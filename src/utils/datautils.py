@@ -9,9 +9,11 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from skimage import io, transform
 from skimage.color import gray2rgb
-import utils.constants as constants
-import utils.helpers as helpers
+from utils import helpers, constants
 from scipy.stats import norm
+import cv2
+from gibson2.utils.utils import parse_config
+from gibson2.utils.assets_utils import get_model_path
 
 class ObservationDataset(Dataset):
     """
@@ -28,10 +30,19 @@ class ObservationDataset(Dataset):
         with open(particles_pkl_file,'rb') as file:
             self.particles_pkl_data = pickle.load(file)
 
+        curr_dir_path = os.path.dirname(os.path.abspath(__file__))
+        config_filename = os.path.join(curr_dir_path, '../config/turtlebot.yaml')
+
+        config_data = parse_config(config_filename)
+        model_id = config_data['model_id']
+        model_path = get_model_path(model_id)
+
         floor_idx = 0
-        model_path = '/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/envs/iGibson/gibson2/dataset/Rs'
         img_name = os.path.join(model_path, 'floor_trav_{0}.png'.format(floor_idx))
         self.env_map = io.imread(img_name)
+
+        self.env_map_res = config_data['trav_map_resolution']
+        self.plts_res = self.env_map_res
 
     def __len__(self):
         return len(self.obs_pkl_data)
@@ -41,26 +52,30 @@ class ObservationDataset(Dataset):
             idx = idx.tolist()
 
         sample = self.obs_pkl_data[idx]
+        sample['occ_map'] = self.env_map
+        sample['occ_map_res'] = self.env_map_res
         sample['env_map'] = gray2rgb(self.env_map)
 
-        std = 0.5
         gt_pose = sample['pose']
         gt_pose = np.expand_dims(gt_pose, axis=0)
 
         # add estimated particles
         sample['est_particles'] = self.particles_pkl_data
 
-        eucld_dist = helpers.eucld_dist(gt_pose, sample['est_particles'], use_numpy=True)
-        sample['est_labels'] = norm.pdf(eucld_dist, loc=0, scale=std).squeeze()
+        eucld_dist = helpers.eucld_dist(
+                        helpers.transform_poses(gt_pose, use_numpy=True), \
+                        helpers.transform_poses(sample['est_particles'], use_numpy=True), \
+                        use_numpy=True
+                    )
+        sample['est_labels'] = norm.pdf(eucld_dist, loc=0, scale=constants.GAUSS_STD).squeeze()
 
         # add gaussian particles around gt pose
-        shape = sample['est_particles'].shape
-        gt_particles = np.random.normal(loc=gt_pose, scale=std, size=shape)
+        shape = (constants.NUM_PARTICLES, constants.STATE_DIMS)
+        gt_particles = np.random.normal(loc=gt_pose, scale=constants.GAUSS_STD, size=shape)
         gt_particles[:, 2:3] = helpers.wrap_angle(gt_particles[:, 2:3], use_numpy=True) # wrap angle
         sample['gt_particles'] = gt_particles
 
-        eucld_dist = helpers.eucld_dist(gt_pose, sample['gt_particles'], use_numpy=True)
-        sample['gt_labels'] = norm.pdf(eucld_dist, loc=0, scale=std).squeeze()
+        sample['gt_labels'] = self.compute_labels(self.env_map, self.env_map_res, gt_pose, gt_particles)
 
         sample['pose'] = gt_pose
 
@@ -68,6 +83,25 @@ class ObservationDataset(Dataset):
             sample = self.transform(sample)
 
         return sample
+
+    def compute_labels(self, occ_map, occ_map_res, gt_pose, particles):
+        eucld_dist = helpers.eucld_dist(
+                        helpers.transform_poses(gt_pose, use_numpy=True), \
+                        helpers.transform_poses(particles, use_numpy=True), \
+                        use_numpy=True
+                    )
+        labels = norm.pdf(eucld_dist, loc=0, scale=constants.GAUSS_STD).squeeze()
+        radius = round(float(0.1 * 10/occ_map_res))
+        occ_map = cv2.flip(occ_map, 0) # need to flip map for display
+        for idx in range(particles.shape[0]):
+            i, j, _ = particles[idx] * 10/occ_map_res
+            col = round(float(i + occ_map.shape[0]/2))
+            row = round(float(-j + occ_map.shape[1]/2)) # extent and origin is different
+
+            collision = np.any(occ_map[row-radius:row+radius, col-radius:col+radius] == 0)
+            if collision:
+                labels[idx] = 0.002 # assign low probability
+        return labels
 
 class Rescale(object):
     """
@@ -126,6 +160,7 @@ class RandomCrop(object):
 
     def __call__(self, sample):
         rgb_img = sample['state']['rgb']
+        env_map = sample['env_map']
 
         h, w = rgb_img.shape[:2]
         new_h, new_w = self.output_size
@@ -134,8 +169,10 @@ class RandomCrop(object):
         left = np.random.randint(0, w - new_w)
 
         new_rgb_img = rgb_img[top: top + new_h, left: left + new_w]
+        new_env_map = env_map[top: top + new_h, left: left + new_w]
 
         sample['state']['rgb'] = new_rgb_img
+        sample['env_map'] = new_env_map
 
         return sample
 

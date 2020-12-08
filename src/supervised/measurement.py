@@ -2,7 +2,7 @@
 
 import numpy as np
 import torch
-from utils import helpers, constants, datautils
+from utils import helpers, constants, datautils, display
 import networks.networks as nets
 from torchvision import models, transforms
 from torch.utils.data import DataLoader
@@ -13,7 +13,7 @@ class Measurement(object):
     """
     """
 
-    def __init__(self, vision_model_name='resnet34', loss='mse'):
+    def __init__(self, vision_model_name='resnet34', loss='mse', render=False):
 
         if vision_model_name == 'resnet34':
             self.vision_model_name = vision_model_name
@@ -40,7 +40,12 @@ class Measurement(object):
 
         self.num_data_files = 25
 
-    def get_obs_data_loader(self, file_idx):
+        if render:
+            self.render = display.Render()
+        else:
+            self.render = None
+
+    def get_obs_data_loader(self, file_idx, batch_size=constants.BATCH_SIZE):
         obs_file_name = 'igibson_data/rnd_pose_obs_data/data_{:04d}.pkl'.format(file_idx)
         particles_file_name = 'igibson_data/rnd_particles_data/particles_{:04d}.pkl'.format(file_idx)
 
@@ -56,7 +61,7 @@ class Measurement(object):
                                     transform=composed)
 
         obs_data_loader = DataLoader(obs_dataset,
-                            batch_size = constants.BATCH_SIZE,
+                            batch_size = batch_size,
                             shuffle = True,
                             num_workers = 0)
 
@@ -211,7 +216,7 @@ class Measurement(object):
         self.set_eval_mode()
 
         rnd_idx = np.random.randint(0, self.num_data_files)
-        obs_data_loader = self.get_obs_data_loader(rnd_idx)
+        obs_data_loader = self.get_obs_data_loader(rnd_idx, batch_size=1)
         with torch.no_grad():
             for _, batch_samples in enumerate(obs_data_loader):
                 # get data
@@ -232,7 +237,16 @@ class Measurement(object):
 
                 input_gt_features = torch.cat([trans_batch_gt_poses, img_features], axis=-1).squeeze()
                 gt_embeddings, gt_likelihoods = self.likelihood_net(input_gt_features)
-                print(gt_likelihoods.squeeze())
+
+                if self.render is not None:
+                    data = {
+                        'occ_map': batch_samples['occ_map'],
+                        'occ_map_res': batch_samples['occ_map_res'],
+                        'robot_gt_pose': batch_samples['pose'],
+                        'robot_gt_particles': batch_samples['gt_particles'],
+                    }
+                    self.render.update_figures(data)
+                break
 
     def save(self, file_name):
         torch.save({
@@ -246,6 +260,9 @@ class Measurement(object):
         self.likelihood_net.load_state_dict(checkpoint['likelihood_net'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
         # print('=> loaded checkpoint')
+
+    def __del__(self):
+        del self.render
 
 if __name__ == '__main__':
     measurement = Measurement()

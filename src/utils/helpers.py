@@ -112,7 +112,7 @@ def sample_motion_model_velocity(vel_cmd, old_pose, delta_t=1., use_noise=False)
 
     return new_pose
 
-def transform_poses(poses):
+def transform_poses(poses, use_numpy=False):
     if len(poses.shape) == 1:
         transformed_poses = torch.cat([
                         poses[0:2],
@@ -120,11 +120,18 @@ def transform_poses(poses):
                         torch.sin(poses[2:3])
                     ], axis=-1)
     elif len(poses.shape) == 2:
-        transformed_poses = torch.cat([
-                        poses[:, 0:2],
-                        torch.cos(poses[:, 2:3]),
-                        torch.sin(poses[:, 2:3])
-                    ], axis=-1)
+        if use_numpy:
+            transformed_poses = np.concatenate([
+                            poses[:, 0:2],
+                            np.cos(poses[:, 2:3]),
+                            np.sin(poses[:, 2:3]),
+                        ], axis=-1)
+        else:
+            transformed_poses = torch.cat([
+                            poses[:, 0:2],
+                            torch.cos(poses[:, 2:3]),
+                            torch.sin(poses[:, 2:3])
+                        ], axis=-1)
     elif len(poses.shape) == 3:
         trans_b_poses = []
         for b_idx in range(poses.shape[0]):
