@@ -90,6 +90,8 @@ class LikelihoodNetwork(nn.Module):
         x = F.relu(self.fc2(x))
         embedding = x
         x = self.fc3(x)
+        # approach [p, img + 4]
+        x = F.softmax(x, dim=2)
         return embedding, x # shape: [N, self.out_features]
 
 class SeqLikeliNetwork(nn.Module):

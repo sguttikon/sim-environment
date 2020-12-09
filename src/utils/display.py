@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 from matplotlib.patches import Wedge
 import cv2
 import numpy as np
@@ -30,13 +31,14 @@ class Render(object):
         self.occ_map_res = helpers.to_numpy(data['occ_map_res'][0])
         self.robot_gt_pose = helpers.to_numpy(data['robot_gt_pose'][0][0])
         self.robot_gt_particles = helpers.to_numpy(data['robot_gt_particles'][0])
+        self.robot_gt_labels = helpers.to_numpy(data['robot_gt_labels'][0])
 
     def update_figures(self, data):
         self.process_data(data)
 
         self.plot_map()
-        self.plot_robot(self.robot_gt_pose, 'green')
-        self.plot_particles(self.robot_gt_particles, 'coral')
+        #self.plot_robot(self.robot_gt_pose, 'green')
+        self.plot_particles(self.robot_gt_particles, 'coral', self.robot_gt_labels)
 
         plt.draw()
         plt.pause(0.00000000001)
@@ -90,6 +92,7 @@ class Render(object):
         ydata = [pos_y, pos_y + (radius + len) * np.sin(heading)]
 
         pose_plt = self.plots['robot_gt']['pose']
+        heading_plt = self.plots['robot_gt']['heading']
         if pose_plt is None:
             pose_plt = Wedge( (pos_x, pos_y), radius, 0, 360, color=color, alpha=0.75)
             self.plt_ax.add_artist(pose_plt)
@@ -101,16 +104,32 @@ class Render(object):
         self.plots['robot_gt']['pose'] = pose_plt
         self.plots['robot_gt']['heading'] = heading_plt
 
-    def plot_particles(self, particles, color):
+    def plot_particles(self, particles, color, labels=None):
         # rescale factor for position is 10/self.occ_map_res
         particles = particles * 10/self.occ_map_res
 
-        particles_plt = self.plots['robot_gt']['particles']
-        if particles_plt is None:
-            particles_plt = plt.scatter(particles[:, 0], particles[:, 1], s= 0.5 * 10/self.occ_map_res, c=color, alpha=0.5)
+        if labels is None:
+            particles_plt = self.plots['robot_gt']['particles']
+            if particles_plt is None:
+                particles_plt = plt.scatter(particles[:, 0], particles[:, 1], s= 0.5 * 10/self.occ_map_res, c=color, alpha=0.5)
+            else:
+                particles_plt.set_offsets(particles[:, 0:2])
+            self.plots['robot_gt']['particles'] = particles_plt
         else:
-            particles_plt.set_offsets(particles[:, 0:2])
-        self.plots['robot_gt']['particles'] = particles_plt
+            colors = cm.rainbow(labels)
+            particles_plt = self.plots['robot_gt']['particles']
+            plts = []
+            idx = 0
+            for pose, c in zip(particles[:, 0:2], colors):
+                if particles_plt is None:
+                    s_plt = plt.scatter(pose[0], pose[1], color=c)
+                else:
+                    s_plt = particles_plt[idx]
+                    s_plt.set_offsets(pose)
+                    s_plt.set_color(c)
+                    idx += 1
+                plts.append(s_plt)
+            self.plots['robot_gt']['particles'] = plts
 
     def __del__(self):
         # to prevent plot from closing

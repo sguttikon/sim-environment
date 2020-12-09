@@ -228,14 +228,16 @@ class Measurement(object):
                 batch_est_labels = batch_samples['est_labels'].to(constants.DEVICE).squeeze()
 
                 trans_batch_gt_poses = helpers.transform_poses(batch_gt_poses)
+                trans_batch_gt_particles = helpers.transform_poses(batch_gt_particles)
 
                 # get encoded image features
                 features = self.feature_extractor(batch_rgbs)
 
                 # approach [p, img + 4]
                 img_features = features['avgpool'].view(batch_rgbs.shape[0], 1, -1)
+                repeat_img_features = img_features.repeat(1, batch_gt_particles.shape[1], 1)
 
-                input_gt_features = torch.cat([trans_batch_gt_poses, img_features], axis=-1).squeeze()
+                input_gt_features = torch.cat([trans_batch_gt_particles, repeat_img_features], axis=-1)
                 gt_embeddings, gt_likelihoods = self.likelihood_net(input_gt_features)
 
                 if self.render is not None:
@@ -244,6 +246,7 @@ class Measurement(object):
                         'occ_map_res': batch_samples['occ_map_res'],
                         'robot_gt_pose': batch_samples['pose'],
                         'robot_gt_particles': batch_samples['gt_particles'],
+                        'robot_gt_labels': gt_likelihoods,
                     }
                     self.render.update_figures(data)
                 break
