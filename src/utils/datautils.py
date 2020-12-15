@@ -75,7 +75,13 @@ class ObservationDataset(Dataset):
         gt_particles[:, 2:3] = helpers.wrap_angle(gt_particles[:, 2:3], use_numpy=True) # wrap angle
         sample['gt_particles'] = gt_particles
 
-        sample['gt_labels'] = self.compute_labels(self.env_map, self.env_map_res, gt_pose, gt_particles)
+        eucld_dist = helpers.eucld_dist(
+                        helpers.transform_poses(gt_pose, use_numpy=True), \
+                        helpers.transform_poses(gt_particles, use_numpy=True), \
+                        use_numpy=True
+                    )
+        sample['gt_labels'] = norm.pdf(eucld_dist, loc=0, scale=constants.GAUSS_STD).squeeze()
+        # sample['gt_labels'] = self.compute_labels(self.env_map, self.env_map_res, gt_pose, gt_particles)
 
         sample['pose'] = gt_pose
 

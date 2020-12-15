@@ -13,13 +13,15 @@ class Measurement(object):
     """
     """
 
-    def __init__(self, vision_model_name='resnet34', loss='mse', render=False):
+    def __init__(self, vision_model_name='resnet34', loss='mse', render=False, pretrained=False):
 
         if vision_model_name == 'resnet34':
             self.vision_model_name = vision_model_name
-            self.vision_model = models.resnet34(pretrained=True).to(constants.DEVICE)
-            for param in self.vision_model.parameters():
-                param.requires_grad = False
+            self.vision_model = models.resnet34(pretrained=pretrained).to(constants.DEVICE)
+            self.vision_model.fc = nn.Identity()
+
+            # for param in self.vision_model.parameters():
+            #     param.requires_grad = False
             layers = ['layer4', 'avgpool']
 
         self.feature_extractor = nets.FeatureExtractor(self.vision_model, layers).to(constants.DEVICE)
@@ -107,10 +109,11 @@ class Measurement(object):
                     trans_batch_est_particles = helpers.transform_poses(batch_est_particles)
 
                     # get encoded image features
-                    features = self.feature_extractor(batch_rgbs)
+                    features = self.vision_model(batch_rgbs)
+                    # features = self.feature_extractor(batch_rgbs)['avgpool']
 
                     # approach [p, img + 4]
-                    img_features = features['avgpool'].view(batch_rgbs.shape[0], 1, -1)
+                    img_features = features.view(batch_rgbs.shape[0], 1, -1)
                     repeat_img_features = img_features.repeat(1, batch_gt_particles.shape[1], 1)
 
                     # input_est_features = torch.cat([trans_batch_est_particles, repeat_img_features], axis=-1).squeeze()
@@ -178,10 +181,11 @@ class Measurement(object):
                         trans_batch_est_particles = helpers.transform_poses(batch_est_particles)
 
                         # get encoded image features
-                        features = self.feature_extractor(batch_rgbs)
+                        features = self.vision_model(batch_rgbs)
+                        # features = self.feature_extractor(batch_rgbs)['avgpool']
 
                         # approach [p, img + 4]
-                        img_features = features['avgpool'].view(batch_rgbs.shape[0], 1, -1)
+                        img_features = features.view(batch_rgbs.shape[0], 1, -1)
                         repeat_img_features = img_features.repeat(1, batch_gt_particles.shape[1], 1)
 
                         # input_est_features = torch.cat([trans_batch_est_particles, repeat_img_features], axis=-1).squeeze()
@@ -231,10 +235,11 @@ class Measurement(object):
                 trans_batch_gt_particles = helpers.transform_poses(batch_gt_particles)
 
                 # get encoded image features
-                features = self.feature_extractor(batch_rgbs)
+                features = self.vision_model(batch_rgbs)
+                # features = self.feature_extractor(batch_rgbs)['avgpool']
 
                 # approach [p, img + 4]
-                img_features = features['avgpool'].view(batch_rgbs.shape[0], 1, -1)
+                img_features = features.view(batch_rgbs.shape[0], 1, -1)
                 repeat_img_features = img_features.repeat(1, batch_gt_particles.shape[1], 1)
 
                 input_gt_features = torch.cat([trans_batch_gt_particles, repeat_img_features], axis=-1)
@@ -254,14 +259,18 @@ class Measurement(object):
     def save(self, file_name):
         torch.save({
             'likelihood_net': self.likelihood_net.state_dict(),
-            'optimizer': self.optimizer.state_dict()
+            'vision_model': self.vision_model.state_dict(),
+            'optimizer': self.optimizer.state_dict(),
+            # 'feature_extractor': self.feature_extractor.state_dict(),
         }, file_name)
         # print('=> created checkpoint')
 
     def load(self, file_name):
         checkpoint = torch.load(file_name)
         self.likelihood_net.load_state_dict(checkpoint['likelihood_net'])
+        self.vision_model.load_state_dict(checkpoint['vision_model'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
+        # self.feature_extractor.load_state_dict(checkpoint['feature_extractor'])
         # print('=> loaded checkpoint')
 
     def __del__(self):
