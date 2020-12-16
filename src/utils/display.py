@@ -32,12 +32,13 @@ class Render(object):
         self.robot_gt_pose = helpers.to_numpy(data['robot_gt_pose'][0][0])
         self.robot_gt_particles = helpers.to_numpy(data['robot_gt_particles'][0])
         self.robot_gt_labels = helpers.to_numpy(data['robot_gt_labels'][0])
+        self.robot_est_labels = helpers.to_numpy(data['robot_est_labels'][0])
 
     def update_figures(self, data):
         self.process_data(data)
 
         self.plot_map()
-        #self.plot_robot(self.robot_gt_pose, 'green')
+        self.plot_robot(self.robot_gt_pose, 'green')
         self.plot_particles(self.robot_gt_particles, 'coral', self.robot_gt_labels)
 
         plt.draw()

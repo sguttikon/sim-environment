@@ -251,7 +251,8 @@ class Measurement(object):
                         'occ_map_res': batch_samples['occ_map_res'],
                         'robot_gt_pose': batch_samples['pose'],
                         'robot_gt_particles': batch_samples['gt_particles'],
-                        'robot_gt_labels': gt_likelihoods,
+                        'robot_gt_labels': batch_samples['gt_labels'],
+                        'robot_est_labels': gt_likelihoods,
                     }
                     self.render.update_figures(data)
                 break

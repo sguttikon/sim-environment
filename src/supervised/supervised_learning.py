@@ -28,12 +28,12 @@ Path("best_models").mkdir(parents=True, exist_ok=True)
 
 if __name__ == '__main__':
     print('running measurement model training')
-    measurement = m.Measurement()
+    measurement = m.Measurement(render=True)
     train_epochs = 500
     eval_epochs = 5
-    measurement.train(train_epochs, eval_epochs)
+    # measurement.train(train_epochs, eval_epochs)
 
-    # file_name = '../bckp/dec_5/best_models/likelihood_mse_best.pth'
-    # measurement.test(file_name)
+    file_name = '../bckp/dec_13/best_models/likelihood_mse_best.pth'
+    measurement.test(file_name)
 
     del measurement
