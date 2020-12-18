@@ -314,13 +314,23 @@ class MapNet(nn.Module):
     def __init__(self):
         super(MapNet, self).__init__()
 
-        self.model = models.resnet18(pretrained=False)
-
-        self.model.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2)
-        self.model.fc = nn.Identity()
+        # model
+        self.conv_model = nn.Sequential(
+            nn.Conv2d(in_channels=1, out_channels=32, kernel_size=3, stride=1),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, stride=1),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(in_features=1600, out_features=512),
+        )
 
     def forward(self, map):
-        features = self.model(map)
+        features = self.conv_model(map)
         return features
 
 # reference https://github.com/ptrblck/pytorch_misc
@@ -374,5 +384,5 @@ class LikeliNet(nn.Module):
         )
 
     def forward(self, x):
-        out = self.conv_model(x)
-        print(out.shape)
+        likelihoods = self.conv_model(x)
+        return likelihoods

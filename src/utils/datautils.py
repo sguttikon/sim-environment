@@ -56,7 +56,7 @@ class ObservationDataset(Dataset):
 
         sample = self.obs_pkl_data[idx]
         sample['occ_map'] = self.env_map
-        sample['floor_map'] = self.floor_map
+        sample['floor_map'] = np.expand_dims(self.floor_map, axis=2)
         sample['occ_map_res'] = self.env_map_res
         sample['env_map'] = gray2rgb(self.env_map)
 
@@ -124,6 +124,7 @@ class Rescale(object):
     def __call__(self, sample):
         rgb_img = sample['state']['rgb']
         env_map = sample['env_map']
+        floor_map = sample['floor_map']
 
         h, w = rgb_img.shape[:2]
         if isinstance(self.output_size, int):
@@ -138,9 +139,11 @@ class Rescale(object):
 
         new_rgb_img = transform.resize(rgb_img, (new_h, new_w))
         new_env_map = transform.resize(env_map, (new_h, new_w))
+        new_floor_map = transform.resize(floor_map, (new_h, new_w))
 
         sample['state']['rgb'] = new_rgb_img
         sample['env_map'] = new_env_map
+        sample['floor_map'] = new_floor_map
 
         return sample
 
@@ -186,6 +189,7 @@ class ToTensor(object):
     def __call__(self, sample):
         rgb_img = sample['state']['rgb']
         env_map = sample['env_map']
+        floor_map = sample['floor_map']
         pose = sample['pose']
         gt_particles = sample['gt_particles']
         gt_labels = sample['gt_labels']
@@ -201,6 +205,9 @@ class ToTensor(object):
         env_map = env_map.transpose((2, 0, 1))
         new_env_map = torch.from_numpy(env_map).float()
 
+        floor_map = floor_map.transpose((2, 0, 1))
+        new_floor_map = torch.from_numpy(floor_map).float()
+
         new_pose = torch.from_numpy(pose).float()
         new_gt_particles = torch.from_numpy(gt_particles).float()
         new_gt_labels = torch.from_numpy(gt_labels).float()
@@ -209,6 +216,7 @@ class ToTensor(object):
 
         sample['state']['rgb'] = new_rgb_img
         sample['env_map'] = new_env_map
+        sample['floor_map'] = new_floor_map
         sample['pose'] = new_pose
         sample['gt_particles'] = new_gt_particles
         sample['gt_labels'] = new_gt_labels
