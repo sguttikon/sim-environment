@@ -41,6 +41,9 @@ class ObservationDataset(Dataset):
         img_name = os.path.join(model_path, 'floor_trav_{0}.png'.format(floor_idx))
         self.env_map = io.imread(img_name)
 
+        img_name = os.path.join(model_path, 'floor_{0}.png'.format(floor_idx))
+        self.floor_map = io.imread(img_name)
+
         self.env_map_res = config_data['trav_map_resolution']
         self.plts_res = self.env_map_res
 
@@ -53,6 +56,7 @@ class ObservationDataset(Dataset):
 
         sample = self.obs_pkl_data[idx]
         sample['occ_map'] = self.env_map
+        sample['floor_map'] = self.floor_map
         sample['occ_map_res'] = self.env_map_res
         sample['env_map'] = gray2rgb(self.env_map)
 

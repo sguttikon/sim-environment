@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 import torch
 from torch import nn, Tensor
+from torchvision import models
 import torch.nn.functional as F
 import utils.constants as constants
 import utils.helpers as helpers
 import numpy as np
 from typing import Dict, Iterable, Callable
+from torch.nn.modules.utils import _pair
 
 class VisionNetwork(nn.Module):
     """
@@ -264,3 +266,113 @@ class SampleMotionModel(nn.Module):
         new_poses = np.concatenate([x_prime, y_prime, theta_prime], axis=-1)
 
         return new_poses # shape: [N, 3]
+
+# reference https://pytorch.org/tutorials/intermediate/spatial_transformer_tutorial.html
+class SpatialTransformerNet(nn.Module):
+
+    def __init__(self):
+        super(SpatialTransformerNet, self).__init__()
+
+        self.localization = models.resnet18(pretrained=False)
+
+        self.localization.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2)
+        self.localization.fc = nn.Identity()
+
+        # Regressor for the 3 * 2 affine matrix
+        self.fc_loc = nn.Sequential(
+            nn.Linear(in_features=516, out_features=1024),
+            nn.ReLU(),
+            nn.Linear(in_features=1024, out_features=1024),
+            nn.ReLU(),
+            nn.Linear(in_features=1024, out_features=3 * 2),
+
+        )
+
+        # Initialize the weights/bias with identity transformation
+        self.fc_loc[4].weight.data.zero_()
+        self.fc_loc[4].bias.data.copy_(torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float))
+
+    def forward(self, map, particles):
+
+        map_features = self.localization(map)
+        repeat_map_features = map_features.repeat(particles.shape[0], 1)
+        input_gt_features = torch.cat([particles, repeat_map_features], axis=-1)
+
+        theta = self.fc_loc(input_gt_features)
+        theta = theta.view(-1, 2, 3)
+
+        grid_size = torch.Size((particles.shape[0], map.shape[1], 64, 64))
+        grid = F.affine_grid(theta, grid_size, align_corners=False)
+
+        repeat_map = map.repeat(particles.shape[0], 1, 1, 1)
+        st_map = F.grid_sample(repeat_map, grid, align_corners=False)
+
+        return st_map
+
+class MapNet(nn.Module):
+
+    def __init__(self):
+        super(MapNet, self).__init__()
+
+        self.model = models.resnet18(pretrained=False)
+
+        self.model.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2)
+        self.model.fc = nn.Identity()
+
+    def forward(self, map):
+        features = self.model(map)
+        return features
+
+# reference https://github.com/ptrblck/pytorch_misc
+class LocallyConnected2d(nn.Module):
+    def __init__(self, in_channels, out_channels, output_size, kernel_size, stride, bias=False):
+        super(LocallyConnected2d, self).__init__()
+        output_size = _pair(output_size)
+        self.weight = nn.Parameter(
+            torch.randn(1, out_channels, in_channels, output_size[0], output_size[1], kernel_size**2)
+        )
+        if bias:
+            self.bias = nn.Parameter(
+                torch.randn(1, out_channels, output_size[0], output_size[1])
+            )
+        else:
+            self.register_parameter('bias', None)
+        self.kernel_size = _pair(kernel_size)
+        self.stride = _pair(stride)
+
+    def forward(self, x):
+        _, c, h, w = x.size()
+        kh, kw = self.kernel_size
+        dh, dw = self.stride
+        x = x.unfold(2, kh, dh).unfold(3, kw, dw)
+        x = x.contiguous().view(*x.size()[:-2], -1)
+        # Sum in in_channel and kernel_size dims
+        out = (x.unsqueeze(1) * self.weight).sum([2, -1])
+        if self.bias is not None:
+            out += self.bias
+        return out
+
+class LikeliNet(nn.Module):
+
+    def __init__(self):
+        super(LikeliNet, self).__init__()
+
+        # model
+        self.conv_model = nn.Sequential(
+            LocallyConnected2d(in_channels=1, out_channels=16, output_size=30, kernel_size=3, stride=1),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+            nn.ReLU(),
+            LocallyConnected2d(in_channels=16, out_channels=16, output_size=12, kernel_size=3, stride=1),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(in_features=400, out_features=128),
+            nn.ReLU(),
+            nn.Linear(in_features=128, out_features=128),
+            nn.ReLU(),
+            nn.Linear(in_features=128, out_features=1),
+        )
+
+    def forward(self, x):
+        out = self.conv_model(x)
+        print(out.shape)

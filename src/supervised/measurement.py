@@ -260,6 +260,7 @@ class Measurement(object):
                         'robot_est_labels': gt_likelihoods,
                     }
                     self.render.update_figures(data)
+                loss = self.loss_fn(gt_likelihoods.squeeze(), batch_gt_labels)
                 break
 
     def save(self, file_name):
