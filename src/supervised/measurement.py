@@ -18,10 +18,10 @@ class Measurement(object):
         if vision_model_name == 'resnet34':
             self.vision_model_name = vision_model_name
             self.vision_model = models.resnet34(pretrained=pretrained).to(constants.DEVICE)
-            self.vision_model.fc = nn.Identity()
+            # self.vision_model.fc = nn.Identity()
 
-            # for param in self.vision_model.parameters():
-            #     param.requires_grad = False
+            for param in self.vision_model.parameters():
+                param.requires_grad = False
             layers = ['layer4', 'avgpool']
 
         self.feature_extractor = nets.FeatureExtractor(self.vision_model, layers).to(constants.DEVICE)
@@ -109,8 +109,8 @@ class Measurement(object):
                     trans_batch_est_particles = helpers.transform_poses(batch_est_particles)
 
                     # get encoded image features
-                    features = self.vision_model(batch_rgbs)
-                    # features = self.feature_extractor(batch_rgbs)['avgpool']
+                    # features = self.vision_model(batch_rgbs)
+                    features = self.feature_extractor(batch_rgbs)['avgpool']
 
                     # approach [p, img + 4]
                     img_features = features.view(batch_rgbs.shape[0], 1, -1)
@@ -128,6 +128,11 @@ class Measurement(object):
                         loss = self.loss_fn(gt_likelihoods.squeeze(), batch_gt_labels)
 
                     loss.backward()
+
+                    # check gradient flow
+                    # helpers.plot_grad_flow(self.vision_model.named_parameters())
+                    # helpers.plot_grad_flow(self.likelihood_net.named_parameters())
+
                     self.optimizer.step()
 
                     batch_loss = batch_loss + loss
@@ -181,8 +186,8 @@ class Measurement(object):
                         trans_batch_est_particles = helpers.transform_poses(batch_est_particles)
 
                         # get encoded image features
-                        features = self.vision_model(batch_rgbs)
-                        # features = self.feature_extractor(batch_rgbs)['avgpool']
+                        # features = self.vision_model(batch_rgbs)
+                        features = self.feature_extractor(batch_rgbs)['avgpool']
 
                         # approach [p, img + 4]
                         img_features = features.view(batch_rgbs.shape[0], 1, -1)
@@ -235,8 +240,8 @@ class Measurement(object):
                 trans_batch_gt_particles = helpers.transform_poses(batch_gt_particles)
 
                 # get encoded image features
-                features = self.vision_model(batch_rgbs)
-                # features = self.feature_extractor(batch_rgbs)['avgpool']
+                # features = self.vision_model(batch_rgbs)
+                features = self.feature_extractor(batch_rgbs)['avgpool']
 
                 # approach [p, img + 4]
                 img_features = features.view(batch_rgbs.shape[0], 1, -1)
@@ -262,7 +267,7 @@ class Measurement(object):
             'likelihood_net': self.likelihood_net.state_dict(),
             'vision_model': self.vision_model.state_dict(),
             'optimizer': self.optimizer.state_dict(),
-            # 'feature_extractor': self.feature_extractor.state_dict(),
+            'feature_extractor': self.feature_extractor.state_dict(),
         }, file_name)
         # print('=> created checkpoint')
 
@@ -271,7 +276,7 @@ class Measurement(object):
         self.likelihood_net.load_state_dict(checkpoint['likelihood_net'])
         self.vision_model.load_state_dict(checkpoint['vision_model'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
-        # self.feature_extractor.load_state_dict(checkpoint['feature_extractor'])
+        self.feature_extractor.load_state_dict(checkpoint['feature_extractor'])
         # print('=> loaded checkpoint')
 
     def __del__(self):

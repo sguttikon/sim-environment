@@ -91,7 +91,7 @@ class LikelihoodNetwork(nn.Module):
         embedding = x
         x = self.fc3(x)
         # approach [p, img + 4]
-        x = F.softmax(x, dim=2)
+        x = torch.sigmoid(x)
         return embedding, x # shape: [N, self.out_features]
 
 class SeqLikeliNetwork(nn.Module):

@@ -39,8 +39,7 @@ class Render(object):
 
         self.plot_map()
         self.plot_robot(self.robot_gt_pose, 'green')
-        self.plot_particles(self.robot_gt_particles, 'coral', self.robot_gt_labels)
-
+        self.plot_particles(self.robot_gt_particles, 'coral', self.robot_est_labels)
         plt.draw()
         plt.pause(0.00000000001)
 

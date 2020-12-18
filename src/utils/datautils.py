@@ -62,11 +62,7 @@ class ObservationDataset(Dataset):
         # add estimated particles
         sample['est_particles'] = self.particles_pkl_data
 
-        eucld_dist = helpers.eucld_dist(
-                        helpers.transform_poses(gt_pose, use_numpy=True), \
-                        helpers.transform_poses(sample['est_particles'], use_numpy=True), \
-                        use_numpy=True
-                    )
+        eucld_dist = helpers.eucld_dist(gt_pose, sample['est_particles'], use_numpy=True)
         sample['est_labels'] = norm.pdf(eucld_dist, loc=0, scale=constants.GAUSS_STD).squeeze()
 
         # add gaussian particles around gt pose
@@ -75,11 +71,7 @@ class ObservationDataset(Dataset):
         gt_particles[:, 2:3] = helpers.wrap_angle(gt_particles[:, 2:3], use_numpy=True) # wrap angle
         sample['gt_particles'] = gt_particles
 
-        eucld_dist = helpers.eucld_dist(
-                        helpers.transform_poses(gt_pose, use_numpy=True), \
-                        helpers.transform_poses(gt_particles, use_numpy=True), \
-                        use_numpy=True
-                    )
+        eucld_dist = helpers.eucld_dist(gt_pose, gt_particles, use_numpy=True)
         sample['gt_labels'] = norm.pdf(eucld_dist, loc=0, scale=constants.GAUSS_STD).squeeze()
         # sample['gt_labels'] = self.compute_labels(self.env_map, self.env_map_res, gt_pose, gt_particles)
 
