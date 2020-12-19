@@ -28,18 +28,19 @@ class Render(object):
 
     def process_data(self, data):
         self.occ_map = helpers.to_numpy(data['occ_map'][0])
+        self.occ_map_shape = self.occ_map.shape
         self.occ_map_res = helpers.to_numpy(data['occ_map_res'][0])
         self.robot_gt_pose = helpers.to_numpy(data['robot_gt_pose'][0][0])
-        self.robot_gt_particles = helpers.to_numpy(data['robot_gt_particles'][0])
-        self.robot_gt_labels = helpers.to_numpy(data['robot_gt_labels'][0])
-        self.robot_est_labels = helpers.to_numpy(data['robot_est_labels'][0])
+        #self.robot_gt_particles = helpers.to_numpy(data['robot_gt_particles'][0])
+        #self.robot_gt_labels = helpers.to_numpy(data['robot_gt_labels'][0])
+        #self.robot_est_labels = helpers.to_numpy(data['robot_est_labels'][0])
 
     def update_figures(self, data):
         self.process_data(data)
 
         self.plot_map()
         self.plot_robot(self.robot_gt_pose, 'green')
-        self.plot_particles(self.robot_gt_particles, 'coral', self.robot_est_labels)
+        #self.plot_particles(self.robot_gt_particles, 'coral', self.robot_est_labels)
         plt.draw()
         plt.pause(0.00000000001)
 
@@ -48,7 +49,7 @@ class Render(object):
         occ_map = self.occ_map
         origin_x, origin_y = 0., 0.
 
-        rows, cols = occ_map.shape
+        rows, cols = self.occ_map_shape
         x_max = (cols )/2 + origin_x
         x_min = (-cols )/2 + origin_x
         y_max = (rows )/2 + origin_y
@@ -57,7 +58,7 @@ class Render(object):
 
         map_plt = self.plots['occ_map']
         if map_plt is None:
-            occ_map = cv2.flip(occ_map, 0)
+            # occ_map = cv2.flip(occ_map, 0)
             map_plt = self.plt_ax.imshow(occ_map, origin='upper', extent=extent)
 
             self.plt_ax.grid()
@@ -81,12 +82,13 @@ class Render(object):
     def plot_robot(self, robot_pose, color):
 
         pos_x, pos_y, heading = robot_pose
-        # rescale factor for position is 10/self.occ_map_res
-        pos_x = pos_x * 10/self.occ_map_res
-        pos_y = pos_y * 10/self.occ_map_res
+        rows, cols = self.occ_map_shape
+        # rescale factor for position is rows/cols* self.occ_map_res
+        pos_x = pos_x * rows * self.occ_map_res
+        pos_y = pos_y * cols * self.occ_map_res
 
-        radius = 0.1 * 10/self.occ_map_res
-        len = 0.1 * 10/self.occ_map_res
+        radius = 0.1 * rows * self.occ_map_res
+        len = 0.1 * rows * self.occ_map_res
 
         xdata = [pos_x, pos_x + (radius + len) * np.cos(heading)]
         ydata = [pos_y, pos_y + (radius + len) * np.sin(heading)]

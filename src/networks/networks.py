@@ -270,44 +270,38 @@ class SampleMotionModel(nn.Module):
 # reference https://pytorch.org/tutorials/intermediate/spatial_transformer_tutorial.html
 class SpatialTransformerNet(nn.Module):
 
-    def __init__(self):
+    def __init__(self, output_size=(128, 128)):
         super(SpatialTransformerNet, self).__init__()
+        self.output_size = output_size
 
-        self.localization = models.resnet18(pretrained=False)
+    def forward(self, layout_map, layout_map_res, particles):
 
-        self.localization.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2)
-        self.localization.fc = nn.Identity()
+        pose_x, pose_y, pose_th = torch.unbind(particles, dim=-1)
+        pose_th = helpers.wrap_angle(pose_th, use_numpy=False)
 
-        # Regressor for the 3 * 2 affine matrix
-        self.fc_loc = nn.Sequential(
-            nn.Linear(in_features=516, out_features=1024),
-            nn.ReLU(),
-            nn.Linear(in_features=1024, out_features=1024),
-            nn.ReLU(),
-            nn.Linear(in_features=1024, out_features=3 * 2),
+        # affine transformation
+        scale = 2 * layout_map_res
+        t_x = pose_x * scale
+        t_y = -pose_y * scale
+        r_c = torch.cos(pose_th)
+        r_s = torch.sin(pose_th)
 
-        )
-
-        # Initialize the weights/bias with identity transformation
-        self.fc_loc[4].weight.data.zero_()
-        self.fc_loc[4].bias.data.copy_(torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float))
-
-    def forward(self, map, particles):
-
-        map_features = self.localization(map)
-        repeat_map_features = map_features.repeat(particles.shape[0], 1)
-        input_gt_features = torch.cat([particles, repeat_map_features], axis=-1)
-
-        theta = self.fc_loc(input_gt_features)
+        theta = torch.cat([r_c, r_s, t_x, -r_s, r_c, t_y], axis=-1)
         theta = theta.view(-1, 2, 3)
+        grid_size = torch.Size((particles.shape[0], layout_map.shape[1], layout_map.shape[2], layout_map.shape[3]))
+        grid = F.affine_grid(theta, grid_size, align_corners=False).float()
 
-        grid_size = torch.Size((particles.shape[0], map.shape[1], 64, 64))
-        grid = F.affine_grid(theta, grid_size, align_corners=False)
+        repeat_layout_map = layout_map.repeat(particles.shape[0], 1, 1, 1)
+        st_layout_map = F.grid_sample(repeat_layout_map, grid, align_corners=False)
 
-        repeat_map = map.repeat(particles.shape[0], 1, 1, 1)
-        st_map = F.grid_sample(repeat_map, grid, align_corners=False)
+        # crop image centered at particle pose
+        _, _, input_row, input_cols = st_layout_map.shape
+        output_row, output_cols = self.output_size
+        s_row_idx = int(input_row//2) - int(output_row)//2
+        s_col_idx = int(input_cols//2) - int(output_cols)//2
+        particles_local_map = st_layout_map[..., s_row_idx:s_row_idx+output_row, s_col_idx:s_col_idx+output_cols]
 
-        return st_map
+        return particles_local_map
 
 class MapNet(nn.Module):
 
@@ -384,5 +378,6 @@ class LikeliNet(nn.Module):
         )
 
     def forward(self, x):
-        likelihoods = self.conv_model(x)
+        x_out = self.conv_model(x)
+        likelihoods = torch.sigmoid(x_out)
         return likelihoods
