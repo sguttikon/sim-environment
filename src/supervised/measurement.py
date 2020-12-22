@@ -18,14 +18,19 @@ class Measurement(object):
         if vision_model_name == 'resnet34':
             self.vision_model_name = vision_model_name
             self.vision_model = models.resnet34(pretrained=pretrained).to(constants.DEVICE)
-            # self.vision_model.fc = nn.Identity()
+            self.vision_model.fc = nn.Identity()
 
-            for param in self.vision_model.parameters():
-                param.requires_grad = False
+            # for param in self.vision_model.parameters():
+            #     param.requires_grad = False
             layers = ['layer4', 'avgpool']
 
         self.feature_extractor = nets.FeatureExtractor(self.vision_model, layers).to(constants.DEVICE)
         self.likelihood_net = nets.LikelihoodNetwork().to(constants.DEVICE)
+
+        output_size=(64, 64)
+        self.spatial_trans = nets.SpatialTransformerNet(output_size).to(constants.DEVICE)
+        self.map_model = nets.MapNet().to(constants.DEVICE)
+        self.likeli_net = nets.LikeliNet().to(constants.DEVICE)
 
         params = list(self.likelihood_net.parameters())
         self.optimizer = optim.Adam(params, lr=2e-4)
@@ -89,38 +94,50 @@ class Measurement(object):
 
             # iterate per pickle data file
             for file_idx in range(self.num_data_files):
-                obs_data_loader = self.get_obs_data_loader(file_idx)
+                obs_data_loader = self.get_obs_data_loader(file_idx, batch_size=1)
 
                 # iterate per batch
-                batch_loss = 0
+                batch_loss = []
                 for _, batch_samples in enumerate(obs_data_loader):
                     self.optimizer.zero_grad()
 
                     # get data
                     batch_rgbs = batch_samples['state']['rgb'].to(constants.DEVICE)
                     batch_gt_poses = batch_samples['pose'].to(constants.DEVICE)
-                    batch_gt_particles = batch_samples['gt_particles'].to(constants.DEVICE)
+                    batch_gt_particles = batch_samples['gt_particles'].to(constants.DEVICE).squeeze()
                     batch_gt_labels = batch_samples['gt_labels'].to(constants.DEVICE).squeeze()
                     batch_est_particles = batch_samples['est_particles'].to(constants.DEVICE)
                     batch_est_labels = batch_samples['est_labels'].to(constants.DEVICE).squeeze()
+                    batch_layout_maps = batch_samples['floor_map'].to(constants.DEVICE)
+                    batch_map_res = batch_samples['floor_map_res'].to(constants.DEVICE)
 
                     # transform particles from orientation angle to cosine and sine values
                     trans_batch_gt_particles = helpers.transform_poses(batch_gt_particles)
                     trans_batch_est_particles = helpers.transform_poses(batch_est_particles)
 
                     # get encoded image features
-                    # features = self.vision_model(batch_rgbs)
-                    features = self.feature_extractor(batch_rgbs)['avgpool']
+                    features = self.vision_model(batch_rgbs)
+                    # features = self.feature_extractor(batch_rgbs)['avgpool']
+
+                    # get particle local map features
+                    particles_local_map = self.spatial_trans(batch_layout_maps, batch_map_res, batch_gt_particles)
+                    repeat_map_features = self.map_model(particles_local_map)
 
                     # approach [p, img + 4]
-                    img_features = features.view(batch_rgbs.shape[0], 1, -1)
-                    repeat_img_features = img_features.repeat(1, batch_gt_particles.shape[1], 1)
+                    img_features = features.view(batch_rgbs.shape[0], -1)
+                    repeat_img_features = img_features.repeat(batch_gt_particles.shape[0], 1)
+
+                    input_vision_features = torch.cat([repeat_img_features, repeat_map_features], axis=-1)
+                    input_vision_features = input_vision_features.view(-1, 1, 32, 32)
+
+                    # calculate likelihoods
+                    gt_likelihoods = self.likeli_net(input_vision_features)
 
                     # input_est_features = torch.cat([trans_batch_est_particles, repeat_img_features], axis=-1).squeeze()
                     # est_embeddings, est_likelihoods = self.likelihood_net(input_est_features)
 
-                    input_gt_features = torch.cat([trans_batch_gt_particles, repeat_img_features], axis=-1).squeeze()
-                    gt_embeddings, gt_likelihoods = self.likelihood_net(input_gt_features)
+                    # input_gt_features = torch.cat([trans_batch_gt_particles, repeat_img_features], axis=-1).squeeze()
+                    # gt_embeddings, gt_likelihoods = self.likelihood_net(input_gt_features)
 
                     if self.loss_fn_name == 'mse':
                         # likelihoods = torch.cat([gt_likelihoods, est_likelihoods], dim=0)
@@ -132,15 +149,19 @@ class Measurement(object):
                     # check gradient flow
                     # helpers.plot_grad_flow(self.vision_model.named_parameters())
                     # helpers.plot_grad_flow(self.likelihood_net.named_parameters())
+                    # helpers.plot_grad_flow(self.likeli_net.named_parameters())
+                    # helpers.plot_grad_flow(self.map_model.named_parameters())
+                    # helpers.plot_grad_flow(self.spatial_trans.named_parameters())
 
                     self.optimizer.step()
 
-                    batch_loss = batch_loss + loss
+                    batch_loss.append(loss.item())
 
                 # log
-                self.writer.add_scalar('training/{}_b_loss'.format(self.loss_fn_name), batch_loss.item(), self.train_idx)
+                m_b_loss = np.mean(batch_loss)
+                self.writer.add_scalar('training/{}_b_loss'.format(self.loss_fn_name), m_b_loss, self.train_idx)
                 self.train_idx = self.train_idx + 1
-                training_loss.append(float(batch_loss))
+                training_loss.append(m_b_loss)
 
             #
             print('mean loss: {0:4f}'.format(np.mean(training_loss)))
@@ -149,8 +170,8 @@ class Measurement(object):
                 file_name = 'saved_models/' + 'likelihood_{0}_idx_{1}.pth'.format(self.loss_fn_name, epoch)
                 self.save(file_name)
 
-            if epoch%eval_epoch == 0:
-                self.eval(num_epochs=eval_epochs)
+            # if epoch%eval_epoch == 0:
+            #     self.eval(num_epochs=eval_epochs)
 
         print('training done')
         self.writer.close()
@@ -269,6 +290,9 @@ class Measurement(object):
             'vision_model': self.vision_model.state_dict(),
             'optimizer': self.optimizer.state_dict(),
             'feature_extractor': self.feature_extractor.state_dict(),
+            'spatial_trans': self.spatial_trans.state_dict(),
+            'map_model': self.map_model.state_dict(),
+            'likeli_net': self.likeli_net.state_dict(),
         }, file_name)
         # print('=> created checkpoint')
 
@@ -278,6 +302,10 @@ class Measurement(object):
         self.vision_model.load_state_dict(checkpoint['vision_model'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
         self.feature_extractor.load_state_dict(checkpoint['feature_extractor'])
+
+        self.spatial_trans.load_state_dict(checkpoint['spatial_trans'])
+        self.map_model.load_state_dict(checkpoint['map_model'])
+        self.likeli_net.load_state_dict(checkpoint['likeli_net'])
         # print('=> loaded checkpoint')
 
     def __del__(self):

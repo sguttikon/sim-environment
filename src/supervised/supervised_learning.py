@@ -7,7 +7,7 @@ def set_path(path: str):
     except ValueError:
         sys.path.insert(0, path)
 
-# set programatically the path to 'openai_ros' directory (alternately can also set PYTHONPATH)
+# set programatically the path to 'sim-environment' directory (alternately can also set PYTHONPATH)
 set_path('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src')
 
 import measurement as m
@@ -28,7 +28,7 @@ Path("best_models").mkdir(parents=True, exist_ok=True)
 
 if __name__ == '__main__':
     print('running measurement model training')
-    measurement = m.Measurement(render=False, pretrained=True)
+    measurement = m.Measurement(render=False, pretrained=False)
     train_epochs = 500
     eval_epochs = 5
     measurement.train(train_epochs, eval_epochs)
