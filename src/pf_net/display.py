@@ -28,14 +28,16 @@ class Render(object):
         plt.draw()
         plt.pause(0.00000000001)
 
-    def plot_map(self, map):
+    def plot_map(self, map, map_res):
 
         rows, cols = map.shape
+        self.map_res = map_res
+        self.map_rows = rows
+
         extent = [-cols/2, cols/2, -rows/2, rows/2]
 
         map_plt = self.plots['map']
         if map_plt is None:
-            map = cv2.flip(map, 0)
             map_plt = self.plt_ax.imshow(map, origin='upper', extent=extent)
 
             self.plt_ax.grid()
@@ -49,11 +51,10 @@ class Render(object):
     def plot_robot(self, robot_pose, clr):
         x, y, theta = robot_pose
 
-        #hardcoded
-        x = x * 100
-        y = y * 100
-        radius = 10
-        length = 10
+        x = x * self.map_rows * self.map_res
+        y = y * self.map_rows * self.map_res
+        radius = 0.1 * self.map_rows * self.map_res
+        length = 0.1 * self.map_rows * self.map_res
 
         xdata = [x, x + (radius + length) * np.cos(theta)]
         ydata = [y, y + (radius + length) * np.sin(theta)]
@@ -78,8 +79,7 @@ class Render(object):
 
     def plot_particles(self, particles, clr):
 
-        #hardcoded
-        positions = particles[:, 0:2] * 100
+        positions = particles[:, 0:2] * self.map_rows * self.map_res
         particles_plt = self.plots['est_robot']['particles']
         if particles_plt is None:
             particles_plt = plt.scatter(positions[:, 0], positions[:, 1], s=10, c=clr, alpha=.5)

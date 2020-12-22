@@ -10,7 +10,7 @@ trav_map_erosion: 2
 
 # robot
 robot: Turtlebot
-is_discrete: false
+is_discrete: true
 velocity: 1.0
 
 # task, observation and action
@@ -67,4 +67,3 @@ scan_noise_rate: 0.0
 # visual objects
 visual_object_at_initial_target_pos: true
 target_visual_object_visible_to_agent: false
-

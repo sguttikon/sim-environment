@@ -97,15 +97,17 @@ class ObservationModel(nn.Module):
         super(ObservationModel, self).__init__()
 
         self.params = params
-        self.model = models.resnet34(pretrained=self.params.pretrained_model).to(self.params.device)
+        self.resnet = models.resnet34(pretrained=self.params.pretrained_model).to(self.params.device)
 
         if self.params.pretrained_model:
-            for param in self.model.parameters():
+            # no need to train resnet
+            for param in self.resnet.parameters():
                 param.requires_grad = False
             layers = ['layer4', 'avgpool']
-            self.feature_extractor = FeatureExtractor(self.model, layers).to(self.params.device)
+            self.feature_extractor = FeatureExtractor(self.resnet, layers).to(self.params.device)
         else:
-            pass
+            # train resnet
+            self.resnet.fc = nn.Identity()
 
         self.likelihood_net = LikelihoodNetwork().to(self.params.device)
 
@@ -113,7 +115,7 @@ class ObservationModel(nn.Module):
         if self.params.pretrained_model:
             features = self.feature_extractor(obs)['avgpool']
         else:
-            pass
+            features = self.resnet(obs)
 
         img_features = features.view(obs.shape[0], 1, -1)
         repeat_img_features = img_features.repeat(1, particle_states.shape[1], 1)
@@ -123,6 +125,18 @@ class ObservationModel(nn.Module):
 
         lik = self.likelihood_net(input_est_features)
         return lik
+
+    def set_train_mode(self):
+        self.resnet.train()
+        self.likelihood_net.train()
+        if self.params.pretrained_model:
+            self.feature_extractor.train()
+
+    def set_eval_mode(self):
+        self.resnet.eval()
+        self.likelihood_net.eval()
+        if self.params.pretrained_model:
+            self.feature_extractor.eval()
 
 class ResamplingModel(nn.Module):
 
@@ -152,7 +166,7 @@ class ResamplingModel(nn.Module):
             # normalize
             q_weights = q_weights - torch.logsumexp(q_weights, dim=-1, keepdim=True)
 
-            particle_weights = particle_weights - q_weights
+            particle_weights = particle_weights - q_weights # unnormalized
         else:
             # hard resampling -> results zero gradients
             q_weights = particle_weights
@@ -162,14 +176,14 @@ class ResamplingModel(nn.Module):
         m = torch.distributions.multinomial.Multinomial(num_particles, q_weights)
         indices = m.sample().long() # shape: (batch_size, num_particles)
 
-        helper = torch.arange(0, batch_size * num_particles, step=num_particles, dtype=torch.int64).to(params.device) # (batch, )
+        helper = torch.arange(0, batch_size * num_particles, step=num_particles, dtype=torch.int64).to(self.params.device) # (batch, )
         indices = indices + helper.unsqueeze(1)
-        indices = torch.reshape(indices, (batch_size * params.num_particles, ))
+        indices = torch.reshape(indices, (batch_size * num_particles, ))
 
-        particle_states = torch.reshape(particle_states, (batch_size * params.num_particles, 3))
+        particle_states = torch.reshape(particle_states, (batch_size * num_particles, 3))
         particle_states = particle_states[indices].view(batch_size, num_particles, -1)
 
-        particle_weights = torch.reshape(particle_weights, (batch_size * params.num_particles, ))
+        particle_weights = torch.reshape(particle_weights, (batch_size * num_particles, ))
         particle_weights = particle_weights[indices].view(batch_size, num_particles)
 
         return particle_states, particle_weights
