@@ -6,8 +6,23 @@ import numpy as np
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 
-def wrap_angle(angle):
-    return np.arctan2(np.sin(angle), np.cos(angle))
+def wrap_angle(angle, isTensor=False):
+    if isTensor:
+        return torch.atan2(torch.sin(angle), torch.cos(angle))
+    else:
+        return np.arctan2(np.sin(angle), np.cos(angle))
+
+def transform_poses(particles):
+    trans_particles = []
+    for b_idx in range(particles.shape[0]):
+        trans_particle = torch.cat([
+                        particles[b_idx][:, 0:2],
+                        torch.cos(particles[b_idx][:, 2:3]),
+                        torch.sin(particles[b_idx][:, 2:3])
+                    ], axis=-1)
+        trans_particles.append(trans_particle)
+    trans_particles = torch.stack(trans_particles)
+    return trans_particles
 
 def calc_odometry(old_pose, new_pose):
     x1, y1, th1 = old_pose
@@ -22,7 +37,8 @@ def calc_odometry(old_pose, new_pose):
     odom_x = cos * abs_x + sin * abs_y
     odom_y = sin * abs_x - cos * abs_y
 
-    return np.array([odom_x, odom_y, odom_th])
+    odometry = np.array([odom_x, odom_y, odom_th])
+    return odometry
 
 class TransitionModelDataSet(Dataset):
 
