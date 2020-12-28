@@ -21,11 +21,12 @@ def parse_args():
     argparser.add_argument('--env_mode', type=str, default='headless', help='choice are [headless, gui]')
     argparser.add_argument('--map_pixel_in_meters', type=float, default=0.1, help='the width (and height) of a pixel of the map in meters')
     argparser.add_argument('--init_particles_std', nargs='*', default=[0.1, 0.1], help='standard deviations for generated initial particles: translation std and rotation std')
+    argparser.add_argument('--init_particles_model', type=str, default='UNIFORM', help='choice are [GAUSS, UNIFORM]')
 
     argparser.add_argument('--pretrained_model', type=bool, default=True, help='use pretrained models')
     argparser.add_argument('--render', type=bool, default=False, help='to render the plots')
     argparser.add_argument('--alpha_resample_ratio', type=float, default=0.5, help='trade-off parameter for soft-resampling 0.0 < alpha <= 1.0' )
-    argparser.add_argument('--num_particles', type=int, default=1000, help='number of particles')
+    argparser.add_argument('--num_particles', type=int, default=5000, help='number of particles')
     argparser.add_argument('--transition_std', nargs='*', default=[0.05, 0.05], help='standard deviations for transition model: translation std and rotation std')
     argparser.add_argument('--seed', type=int, default=42, help='random seed value to set')
     argparser.add_argument('--num_eps', type=int, default=1000, help='number of episodes to train')
@@ -51,5 +52,10 @@ if __name__ == '__main__':
 
     pf_net = PFNet(params)
     pf_net.run_training()
+
+    # file_name = '../bckp/dec_23/saved_models/pfnet_eps_990.pth'
+    # pf_net.run_validation(file_name)
+
+    # pf_net.run_manual()
 
     del pf_net

@@ -3,7 +3,7 @@
 from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
 import numpy as np
-
+import torch
 
 # reference https://discuss.pytorch.org/t/check-gradient-flow-in-network/15063/10
 def plot_grad_flow(named_parameters):
