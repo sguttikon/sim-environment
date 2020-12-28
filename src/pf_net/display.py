@@ -2,6 +2,7 @@
 
 import cv2
 import numpy as np
+import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 from matplotlib.patches import Wedge
 
@@ -38,7 +39,8 @@ class Render(object):
 
         map_plt = self.plots['map']
         if map_plt is None:
-            map_plt = self.plt_ax.imshow(map, origin='upper', extent=extent)
+            floor_map = cv2.flip(map, 0)
+            map_plt = self.plt_ax.imshow(floor_map, origin='upper', extent=extent)
 
             self.plt_ax.grid()
             self.plt_ax.set_xlabel('x coords')
@@ -77,16 +79,31 @@ class Render(object):
         self.plots['gt_robot']['pose'] = pose_plt
         self.plots['gt_robot']['heading'] = heading_plt
 
-    def plot_particles(self, particles, clr):
+    def plot_particles(self, particles, particle_weights, clr):
 
         positions = particles[:, 0:2] * self.map_rows * self.map_res
         particles_plt = self.plots['est_robot']['particles']
-        if particles_plt is None:
-            particles_plt = plt.scatter(positions[:, 0], positions[:, 1], s=10, c=clr, alpha=.5)
-        else:
-            particles_plt.set_offsets(positions[:, 0:2])
 
-        self.plots['est_robot']['particles'] = particles_plt
+        if particle_weights is None:
+            if particles_plt is None:
+                particles_plt = plt.scatter(positions[:, 0], positions[:, 1], s=10, c=clr, alpha=.5)
+            else:
+                particles_plt.set_offsets(positions[:, 0:2])
+            self.plots['est_robot']['particles'] = particles_plt
+        else:
+            colors = cm.rainbow(particle_weights)
+            plts = []
+            idx = 0
+            for pose, c in zip(positions, colors):
+                if particles_plt is None:
+                    s_plt = plt.scatter(pose[0], pose[1], color=c)
+                else:
+                    s_plt = particles_plt[idx]
+                    s_plt.set_offsets(pose)
+                    s_plt.set_color(c)
+                    idx += 1
+                plts.append(s_plt)
+            self.plots['est_robot']['particles'] = plts
 
     def __del__(self):
         # to prevent plot from automatic closing

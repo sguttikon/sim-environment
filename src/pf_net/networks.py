@@ -6,6 +6,7 @@ from torch import nn, Tensor
 import numpy as np
 import datautils
 import argparse
+import helpers
 import torch
 
 class TransitionModel(nn.Module):
@@ -15,35 +16,85 @@ class TransitionModel(nn.Module):
 
         self.params = params
 
-    def forward(self, particle_states: Tensor, odometry: np.ndarray) -> Tensor:
+        self.params.alpha = 0.1
 
-        translation_std = self.params.transition_std[0]
-        rotation_std = self.params.transition_std[1]
+    def forward(self, particle_states: Tensor, odometry: np.ndarray, old_pose: np.ndarray) -> Tensor:
 
-        parts_x, parts_y, parts_th = particle_states.unbind(dim=-1)
+        # translation_std = self.params.transition_std[0]
+        # rotation_std = self.params.transition_std[1]
+        #
+        # parts_x, parts_y, parts_th = particle_states.unbind(dim=-1)
+        #
+        # odom_x, odom_y, odom_th = odometry
+        #
+        # # add orientation noise
+        # noise_th = torch.normal(mean=0, std=1.0, size=parts_th.shape).to(self.params.device) * rotation_std
+        # parts_th = parts_th + noise_th
+        #
+        # sin_th = torch.sin(parts_th)
+        # cos_th = torch.cos(parts_th)
+        # delta_x = odom_x * cos_th + odom_y * sin_th
+        # delta_y = odom_x * sin_th - odom_y * cos_th
+        # delta_th = odom_th
+        #
+        # noise_x = torch.normal(mean=0, std=1.0, size=parts_th.shape).to(self.params.device) * translation_std
+        # noise_y = torch.normal(mean=0, std=1.0, size=parts_th.shape).to(self.params.device) * translation_std
+        # delta_x = delta_x + noise_x
+        # delta_y = delta_y + noise_y
+        #
+        # x = parts_x + delta_x
+        # y = parts_y + delta_y
+        # th = datautils.wrap_angle(parts_th + delta_th, isTensor=True)
+        #
+        # return torch.stack([x, y, th], axis=-1)
 
-        odom_x, odom_y, odom_th = odometry
+        return self.sample_motion_odometry(particle_states, odometry, old_pose)
 
-        # add orientation noise
-        noise_th = torch.normal(mean=0, std=1.0, size=parts_th.shape).to(self.params.device) * rotation_std
-        parts_th = parts_th + noise_th
+    def sample_motion_odometry(self, particle_states: Tensor, odometry: np.ndarray, old_pose: np.ndarray) -> Tensor:
+        x1, y1, th1 = old_pose
+        abs_x, abs_y, abs_th = odometry
 
-        sin_th = torch.sin(parts_th)
-        cos_th = torch.cos(parts_th)
-        delta_x = odom_x * cos_th + odom_y * sin_th
-        delta_y = odom_x * sin_th - odom_y * cos_th
-        delta_th = odom_th
+        delta_trans = np.sqrt(abs_y**2 + abs_x**2)
+        if delta_trans < 0.01:
+            # avoid computing bearing if poses are extremely near => say in-place rotation
+            delta_rot1 = 0.0
+        else:
+            delta_rot1 = helpers.angle_diff(np.arctan2(abs_y, abs_x), th1)
+        delta_rot2 = helpers.angle_diff(abs_th, delta_rot1)
 
-        noise_x = torch.normal(mean=0, std=1.0, size=parts_th.shape).to(self.params.device) * translation_std
-        noise_y = torch.normal(mean=0, std=1.0, size=parts_th.shape).to(self.params.device) * translation_std
-        delta_x = delta_x + noise_x
-        delta_y = delta_y + noise_y
+        delta_rot1_noise = np.minimum(
+                                        np.fabs(helpers.angle_diff(delta_rot1, 0.0)),
+                                        np.fabs(helpers.angle_diff(delta_rot1, np.pi))
+                                    )
 
-        x = parts_x + delta_x
-        y = parts_y + delta_y
-        th = datautils.wrap_angle(parts_th + delta_th, isTensor=True)
+        delta_rot2_noise = np.minimum(
+                                        np.fabs(helpers.angle_diff(delta_rot2, 0.0)),
+                                        np.fabs(helpers.angle_diff(delta_rot2, np.pi))
+                                    )
 
-        return torch.stack([x, y, th], axis=-1)
+        alpha1 = self.params.alpha
+        alpha2 = self.params.alpha
+        alpha3 = self.params.alpha
+        alpha4 = self.params.alpha
+
+        for particle in particle_states:
+            # sample pose differences
+            scale = alpha1*delta_rot1_noise*delta_rot1_noise + alpha2*delta_trans*delta_trans
+            delta_rot1_hat = helpers.angle_diff(delta_rot1, np.random.normal(0.0, scale))
+
+            scale = alpha4*delta_rot1_noise*delta_rot1_noise + alpha3*delta_trans*delta_trans + \
+                    alpha4*delta_rot2_noise*delta_rot2_noise
+            delta_trans_hat = delta_trans - np.random.normal(0.0, scale)
+
+            scale = alpha1*delta_rot2_noise*delta_rot2_noise + alpha2*delta_trans*delta_trans
+            delta_rot2_hat = helpers.angle_diff(delta_rot2, np.random.normal(0.0, scale))
+
+            # apply sampled update to particle pose
+            particle[..., 0] = particle[..., 0] + delta_trans_hat * torch.cos(particle[..., 2] + delta_rot1_hat)
+            particle[..., 1] = particle[..., 1] + delta_trans_hat * torch.sin(particle[..., 2] + delta_rot1_hat)
+            particle[..., 2] = particle[..., 2] + delta_rot1_hat + delta_rot2_hat
+
+        return particle_states
 
 class FeatureExtractor(nn.Module):
     """
@@ -173,8 +224,14 @@ class ResamplingModel(nn.Module):
             particle_weights = uniform_weights
 
         # sample particle indices according to q(s)
-        m = torch.distributions.multinomial.Multinomial(num_particles, q_weights)
-        indices = m.sample().long() # shape: (batch_size, num_particles)
+        m = torch.distributions.categorical.Categorical(logits=q_weights)
+        indices = []
+        for i in range(batch_size):
+            idx = []
+            for j in range(num_particles):
+                idx.append(m.sample())
+            indices.append(torch.stack(idx).squeeze(1))
+        indices = torch.stack(indices)
 
         helper = torch.arange(0, batch_size * num_particles, step=num_particles, dtype=torch.int64).to(self.params.device) # (batch, )
         indices = indices + helper.unsqueeze(1)

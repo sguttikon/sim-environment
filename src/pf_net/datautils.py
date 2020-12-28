@@ -6,15 +6,6 @@ import numpy as np
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 
-def wrap_angle(angle, isTensor=False):
-    '''
-        wrap the give angle to range [-np.pi, np.pi]
-    '''
-    if isTensor:
-        return torch.atan2(torch.sin(angle), torch.cos(angle))
-    else:
-        return np.arctan2(np.sin(angle), np.cos(angle))
-
 def transform_poses(particles):
     trans_particles = []
     for b_idx in range(particles.shape[0]):
