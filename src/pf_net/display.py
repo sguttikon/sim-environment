@@ -21,11 +21,23 @@ class Render(object):
                 'heading': None,
             },
             'est_robot': {
+                'pose': None,
+                'heading': None,
                 'particles': None,
             },
         }
 
-    def update_figures(self):
+    def update_figures(self, data):
+
+        gt_pose = data['gt_pose']
+        est_pose = data['est_pose']
+        particle_states = data['particle_states']
+        particle_weights = data['particle_weights']
+
+        self.plot_gt_robot(gt_pose, 'green')
+        self.plot_est_robot(est_pose, 'blue')
+        self.plot_particles(particle_states, particle_weights, 'coral')
+
         plt.draw()
         plt.pause(0.00000000001)
 
@@ -50,7 +62,25 @@ class Render(object):
 
         self.plots['map'] = map_plt
 
-    def plot_robot(self, robot_pose, clr):
+    def plot_gt_robot(self, gt_pose, clr):
+        pose_plt = self.plots['gt_robot']['pose']
+        heading_plt = self.plots['gt_robot']['heading']
+
+        pose_plt, heading_plt = self.plot_robot(gt_pose, pose_plt, heading_plt, clr)
+
+        self.plots['gt_robot']['pose'] = pose_plt
+        self.plots['gt_robot']['heading'] = heading_plt
+
+    def plot_est_robot(self, est_pose, clr):
+        pose_plt = self.plots['est_robot']['pose']
+        heading_plt = self.plots['est_robot']['heading']
+
+        pose_plt, heading_plt = self.plot_robot(est_pose, pose_plt, heading_plt, clr)
+
+        self.plots['est_robot']['pose'] = pose_plt
+        self.plots['est_robot']['heading'] = heading_plt
+
+    def plot_robot(self, robot_pose, pose_plt, heading_plt, clr):
         x, y, theta = robot_pose
 
         x = x * self.map_rows * self.map_res
@@ -61,8 +91,7 @@ class Render(object):
         xdata = [x, x + (radius + length) * np.cos(theta)]
         ydata = [y, y + (radius + length) * np.sin(theta)]
 
-        pose_plt = self.plots['gt_robot']['pose']
-        heading_plt = self.plots['gt_robot']['heading']
+
         if pose_plt is None:
             pose_plt = Wedge((x, y), radius, 0, 360, color=clr, alpha=.75)
             self.plt_ax.add_artist(pose_plt)
@@ -76,8 +105,7 @@ class Render(object):
                 'ydata': ydata,
             })
 
-        self.plots['gt_robot']['pose'] = pose_plt
-        self.plots['gt_robot']['heading'] = heading_plt
+        return pose_plt, heading_plt
 
     def plot_particles(self, particles, particle_weights, clr):
 

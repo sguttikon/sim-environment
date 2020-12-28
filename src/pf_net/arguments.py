@@ -21,7 +21,7 @@ def parse_args():
     argparser.add_argument('--env_mode', type=str, default='headless', help='choice are [headless, gui]')
     argparser.add_argument('--map_pixel_in_meters', type=float, default=0.1, help='the width (and height) of a pixel of the map in meters')
     argparser.add_argument('--init_particles_std', nargs='*', default=[0.1, 0.1], help='standard deviations for generated initial particles: translation std and rotation std')
-    argparser.add_argument('--init_particles_model', type=str, default='UNIFORM', help='choice are [GAUSS, UNIFORM]')
+    argparser.add_argument('--init_particles_model', type=str, default='GAUSS', help='choice are [GAUSS, UNIFORM]')
 
     argparser.add_argument('--pretrained_model', type=bool, default=True, help='use pretrained models')
     argparser.add_argument('--render', type=bool, default=False, help='to render the plots')
@@ -30,7 +30,7 @@ def parse_args():
     argparser.add_argument('--transition_std', nargs='*', default=[0.05, 0.05], help='standard deviations for transition model: translation std and rotation std')
     argparser.add_argument('--seed', type=int, default=42, help='random seed value to set')
     argparser.add_argument('--num_eps', type=int, default=1000, help='number of episodes to train')
-    argparser.add_argument('--eps_len', type=int, default=250, help='length of each episode')
+    argparser.add_argument('--eps_len', type=int, default=50, help='length of each episode')
 
     params = argparser.parse_args()
 
