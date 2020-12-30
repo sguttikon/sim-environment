@@ -77,22 +77,30 @@ class TransitionModel(nn.Module):
         alpha3 = self.params.alpha
         alpha4 = self.params.alpha
 
-        for particle in particle_states:
-            # sample pose differences
-            scale = alpha1*delta_rot1_noise*delta_rot1_noise + alpha2*delta_trans*delta_trans
-            delta_rot1_hat = helpers.angle_diff(delta_rot1, np.random.normal(0.0, scale))
+        delta_rot1_scale = alpha1*delta_rot1**2 + alpha2*delta_trans**2
+        delta_trans_scale = alpha3*delta_trans**2 + alpha4*delta_rot1**2 + \
+                            alpha4*delta_rot2**2
+        delta_rot2_scale = alpha1*delta_rot2**2 + alpha2*delta_trans**2
 
-            scale = alpha4*delta_rot1_noise*delta_rot1_noise + alpha3*delta_trans*delta_trans + \
-                    alpha4*delta_rot2_noise*delta_rot2_noise
-            delta_trans_hat = delta_trans - np.random.normal(0.0, scale)
+        # shape [batch_size, particles, 3]
+        # iterate per batch
+        for b_idx in range(particle_states.shape[0]):
+            # iterate per particle
+            for p_idx in range(particle_states.shape[1]):
+                # sample pose differences
+                delta_rot1_hat = helpers.angle_diff(delta_rot1, np.random.normal(0.0, delta_rot1_scale))
 
-            scale = alpha1*delta_rot2_noise*delta_rot2_noise + alpha2*delta_trans*delta_trans
-            delta_rot2_hat = helpers.angle_diff(delta_rot2, np.random.normal(0.0, scale))
+                delta_trans_hat = delta_trans - np.random.normal(0.0, delta_trans_scale)
 
-            # apply sampled update to particle pose
-            particle[..., 0] = particle[..., 0] + delta_trans_hat * torch.cos(particle[..., 2] + delta_rot1_hat)
-            particle[..., 1] = particle[..., 1] + delta_trans_hat * torch.sin(particle[..., 2] + delta_rot1_hat)
-            particle[..., 2] = particle[..., 2] + delta_rot1_hat + delta_rot2_hat
+                delta_rot2_hat = helpers.angle_diff(delta_rot2, np.random.normal(0.0, delta_rot2_scale))
+
+                # apply sampled update to particle pose
+                particle_states[b_idx, p_idx, 0] = particle_states[b_idx, p_idx, 0] + \
+                    delta_trans_hat * torch.cos(particle_states[b_idx, p_idx, 2] + delta_rot1_hat)
+                particle_states[b_idx, p_idx, 1] = particle_states[b_idx, p_idx, 1] + \
+                    delta_trans_hat * torch.sin(particle_states[b_idx, p_idx, 2] + delta_rot1_hat)
+                particle_states[b_idx, p_idx, 2] = particle_states[b_idx, p_idx, 2] + \
+                    delta_rot1_hat + delta_rot2_hat
 
         return particle_states
 
