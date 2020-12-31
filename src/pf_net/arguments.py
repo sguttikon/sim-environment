@@ -24,13 +24,15 @@ def parse_args():
     argparser.add_argument('--init_particles_model', type=str, default='GAUSS', help='choice are [GAUSS, UNIFORM]')
 
     argparser.add_argument('--pretrained_model', type=bool, default=True, help='use pretrained models')
+    argparser.add_argument('--obs_model', type=bool, default=True, help='learn observation model')
+    argparser.add_argument('--resample', type=bool, default=True, help='resample particles')
     argparser.add_argument('--render', type=bool, default=False, help='to render the plots')
     argparser.add_argument('--alpha_resample_ratio', type=float, default=0.5, help='trade-off parameter for soft-resampling 0.0 < alpha <= 1.0' )
     argparser.add_argument('--num_particles', type=int, default=5000, help='number of particles')
     argparser.add_argument('--transition_std', nargs='*', default=[0.05, 0.05], help='standard deviations for transition model: translation std and rotation std')
     argparser.add_argument('--seed', type=int, default=42, help='random seed value to set')
     argparser.add_argument('--num_eps', type=int, default=1000, help='number of episodes to train')
-    argparser.add_argument('--eps_len', type=int, default=50, help='length of each episode')
+    argparser.add_argument('--eps_len', type=int, default=100, help='length of each episode')
 
     params = argparser.parse_args()
 
@@ -55,7 +57,5 @@ if __name__ == '__main__':
 
     # file_name = '../bckp/dec_23/saved_models/pfnet_eps_990.pth'
     # pf_net.run_validation(file_name)
-
-    # pf_net.run_manual()
 
     del pf_net

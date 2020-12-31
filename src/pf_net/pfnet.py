@@ -14,6 +14,7 @@ import networks as nets
 import numpy as np
 import datautils
 import helpers
+import scipy
 import torch
 import cv2
 import os
@@ -143,15 +144,45 @@ class PFNet(object):
 
         return gt_pose
 
-    def get_est_pose(self, particle_states, particle_weights, is_Tensor=False):
-        lin_weights = torch.nn.functional.softmax(particle_weights, dim=-1)
-        est_pose = torch.sum(torch.torch.mul(particle_states[:, :, :3], lin_weights[:, :, None]), dim=1)
-        est_pose[:, 2] = helpers.normalize(est_pose[:, 2], isTensor=True)
+    def get_est_pose(self, particle_states, particle_weights, isTensor=False):
 
-        if is_Tensor:
-            return est_pose
+        if isTensor:
+            # shape [batch_size, particles, 3]
+            lin_weights = torch.nn.functional.softmax(particle_weights, dim=-1)
+            est_pose = torch.sum(torch.mul(particle_states[:, :, :3], lin_weights[:, :, None]), dim=1)
+            est_pose[:, 2] = helpers.normalize(est_pose[:, 2], isTensor=True)
+
+            covariance = []
+            # iterate per batch
+            for i in range(particle_states.shape[0]):
+                cov = helpers.cov(particle_states[i], aweights=lin_weights[i])
+                covariance.append(cov)
+
+            covariance_matrix = torch.stack(covariance)
+            isSingular = torch.isclose(torch.det(covariance_matrix), torch.zeros(1).to(self.params.device))[0]
+
+            if isSingular:
+                # covariance_matrix is singular
+                entropy = torch.zeros(1).to(self.params.device) #TODO
+            else:
+                mvn = torch.distributions.multivariate_normal.MultivariateNormal(est_pose, covariance_matrix)
+                entropy = mvn.entropy()
         else:
-            return est_pose.squeeze(0).detach().cpu().numpy()
+            # shape [particles, 3]
+            lin_weights = scipy.special.softmax(particle_weights, axis=-1)
+            est_pose = np.sum(np.multiply(particle_states[:, :3], lin_weights[:, None]), axis=0)
+            est_pose[2] = helpers.normalize(est_pose[2], isTensor=False)
+
+            covariance_matrix = np.cov(particle_states.T, aweights=lin_weights)
+            isSingular = np.isclose(np.det(covariance_matrix), np.zeros(1))[0]
+
+            if isSingular:
+                # covariance_matrix is singular
+                entropy = np.zeros(1) #TODO
+            else:
+                mvn = multivariate_normal(est_pose, covariance_matrix, seed=self.params.seed)
+                entropy = mvn.entropy()
+        return est_pose, covariance_matrix, entropy
 
     def get_env_map(self, trav_map_erosion):
 
@@ -214,16 +245,21 @@ class PFNet(object):
         observation, odometry, old_pose = inputs
 
         # observation update
-        lik = self.observation_model(particle_states, observation)
-        # mean = old_pose
-        # cov = [[0.2*0.2, 0, 0], [0, 0.2*0.2, 0], [0, 0, np.pi/12*np.pi/12]]
-        # tmp_particles = particle_states.squeeze(0).detach().cpu().numpy()
-        # lik = multivariate_normal.logpdf(tmp_particles, mean, cov)
-        # lik = torch.from_numpy(lik).float().unsqueeze(0).to(self.params.device)
+        if self.params.obs_model:
+            lik = self.observation_model(particle_states, observation)
+        else:
+            mean = old_pose # [0., 0., 0.]
+            cov = [[0.5*0.5, 0, 0], [0, 0.5*0.5, 0], [0, 0, np.pi/12*np.pi/12]]
+            tmp_particles = particle_states.squeeze(0).detach().cpu().numpy()
+
+            lik = multivariate_normal.logpdf(tmp_particles, mean, cov)
+            lik = torch.from_numpy(lik).float().unsqueeze(0).to(self.params.device)
+
         particle_weights += lik  # unnormalized
 
         # resample
-        particle_states, particle_weights = self.resample(particle_states, particle_weights)
+        if self.params.resample:
+            particle_states, particle_weights = self.resample(particle_states, particle_weights)
 
         # construct output before motion update
         outputs = particle_states, particle_weights
@@ -258,7 +294,10 @@ class PFNet(object):
 
         # combine translational and orientation losses
         loss_combined = loss_coords + 0.36 * loss_orient
-        total_loss = torch.mean(loss_combined)
+
+        est_state, covariance, entropy = self.get_est_pose(particle_states, particle_weights, isTensor=True)
+
+        total_loss = torch.mean(loss_combined) + 1.0 * entropy
 
         total_loss.backward(retain_graph=True)
 
@@ -270,12 +309,11 @@ class PFNet(object):
 
         self.optimizer.zero_grad()
 
-        est_state = self.get_est_pose(particle_states, particle_weights, is_Tensor=True)
         pose_mse = torch.norm(true_state-est_state)
 
         self.writer.add_scalar('training/loss' + ('_pretrained' if self.params.pretrained_model else ''), total_loss.item(), self.train_idx)
         self.train_idx = self.train_idx + 1
-        return total_loss, pose_mse
+        return total_loss, pose_mse, entropy
 
     def set_train_mode(self):
         self.observation_model.set_train_mode()
@@ -302,7 +340,8 @@ class PFNet(object):
             'particle_states': particle_states,
             'particle_weights': particle_weights,
         }
-        self.render.update_figures(data)
+        if self.params.render:
+            self.render.update_figures(data)
 
     def run_training(self):
 
@@ -339,13 +378,14 @@ class PFNet(object):
                 true_state = true_state.unsqueeze(0) # add batch dimension
 
                 # compute loss
-                total_loss, pose_mse = self.compute_loss(outputs, true_state)
+                total_loss, pose_mse, entropy = self.compute_loss(outputs, true_state)
 
                 # get latest observation
                 old_pose = new_pose
                 observation = new_env_obs['rgb']
 
             self.writer.add_scalar('training/pose_mse', pose_mse.item(), eps_idx)
+            self.writer.add_scalar('training/entropy', entropy.item(), eps_idx)
 
             if eps_idx%save_eps == 0:
                 file_name = 'saved_models/' + 'pfnet_eps_{0}.pth'.format(eps_idx)
@@ -356,7 +396,7 @@ class PFNet(object):
 
     def run_validation(self, file_name):
 
-        self.load(file_name)
+        # self.load(file_name)
 
         # iterate per episode
         for eps in range(1):
@@ -370,10 +410,11 @@ class PFNet(object):
 
             # plot
             particle_states, particle_weights = state
-            est_pose = self.get_est_pose(particle_states, particle_weights)
+            est_pose, covariance, entropy = self.get_est_pose(particle_states, particle_weights, isTensor=True)
 
+            est_pose = est_pose.squeeze(0).detach().cpu().numpy()
             particle_states = particle_states.squeeze(0).detach().cpu().numpy()
-            particle_weights = particle_weights.squeeze(0).detach().cpu().numpy
+            particle_weights = particle_weights.squeeze(0).detach().cpu().numpy()
             self.plot_figures(old_pose, est_pose, particle_states, None)
 
             # iterate per episode step
@@ -394,64 +435,24 @@ class PFNet(object):
                     inputs = observation, odometry, old_pose
                     outputs, state = self.episode_run(inputs, state)
 
+                    true_state = torch.from_numpy(old_pose).float().to(self.params.device)
+                    true_state = true_state.unsqueeze(0) # add batch dimension
+
                     # plot
                     particle_states, particle_weights = outputs
-                    est_pose = self.get_est_pose(particle_states, particle_weights)
+                    est_state, covariance, entropy = self.get_est_pose(particle_states, particle_weights, isTensor=True)
+                    pose_mse = torch.norm(true_state-est_state)
 
+                    est_pose = est_state.squeeze(0).detach().cpu().numpy()
                     particle_states = particle_states.squeeze(0).detach().cpu().numpy()
                     particle_weights = particle_weights.squeeze(0).detach().cpu().numpy()
                     self.plot_figures(old_pose, est_pose, particle_states, None)
 
-                    true_state = torch.from_numpy(old_pose).float().to(self.params.device)
-                    true_state = true_state.unsqueeze(0) # add batch dimension
-
                     # get latest observation
                     old_pose = new_pose
                     observation = new_env_obs['rgb']
+                print(pose_mse, true_state, est_state, covariance, entropy)
 
-
-    def run_manual(self):
-        # iterate per episode
-        for eps in range(1):
-            self.set_eval_mode()
-
-            state, observation = self.init_particles()
-            # plot
-            self.render.plot_gt_robot(old_pose, 'green')
-            particle_states, particle_weights = state
-            self.render.plot_particles(particle_states, None, 'coral')
-
-            # preprocess
-            state = self.transform_state(state)
-
-            # iterate per episode step
-            with torch.no_grad():
-                for eps_step in range(0):
-
-                    # take action in environment
-                    action = self.env.action_space.sample()
-                    #HACK avoid back movement
-                    action = 0 if action == 1 else action
-                    new_env_obs, _, done, _ = self.env.step(action)
-
-                    # preprocess
-                    new_pose = self.get_gt_pose()
-                    odometry = helpers.compute_odometry(old_pose, new_pose)
-                    observation = self.transform_observation(observation).to(self.params.device)
-
-                    inputs = observation, odometry, old_pose
-                    outputs, state = self.episode_run(inputs, state)
-
-                    # plot
-                    self.render.plot_gt_robot(old_pose, 'green')
-                    particle_states, particle_weights = outputs
-                    particle_states = particle_states.squeeze(0).detach().cpu().numpy()
-                    particle_weights = particle_weights.squeeze(0).detach().cpu().numpy()
-                    self.render.plot_particles(particle_states, None, 'coral')
-
-                    # get latest observation
-                    old_pose = new_pose
-                    observation = new_env_obs['rgb']
 
     def __del__(self):
         del self.render
