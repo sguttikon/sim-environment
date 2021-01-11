@@ -396,7 +396,7 @@ class PFNet(object):
 
     def run_validation(self, file_name):
 
-        # self.load(file_name)
+        self.load(file_name)
 
         # iterate per episode
         for eps in range(1):
@@ -415,16 +415,23 @@ class PFNet(object):
             est_pose = est_pose.squeeze(0).detach().cpu().numpy()
             particle_states = particle_states.squeeze(0).detach().cpu().numpy()
             particle_weights = particle_weights.squeeze(0).detach().cpu().numpy()
-            self.plot_figures(old_pose, est_pose, particle_states, None)
+            self.plot_figures(old_pose, est_pose, particle_states, particle_weights)
 
             # iterate per episode step
             with torch.no_grad():
                 for eps_step in range(50):
 
                     # take action in environment
-                    action = self.env.action_space.sample()
-                    #HACK avoid back movement
-                    action = 0 if action == 1 else action
+                    if self.params.manual_action:
+                        # manual
+                        value = input("\n 0: Forward, 2: Right, 3:Left - ")
+                        action = int(value)
+                    else:
+                        # random
+                        action = self.env.action_space.sample()
+                        #HACK avoid back movement
+                        action = 0 if action == 1 else action
+
                     new_env_obs, _, done, _ = self.env.step(action)
 
                     # preprocess
@@ -446,12 +453,13 @@ class PFNet(object):
                     est_pose = est_state.squeeze(0).detach().cpu().numpy()
                     particle_states = particle_states.squeeze(0).detach().cpu().numpy()
                     particle_weights = particle_weights.squeeze(0).detach().cpu().numpy()
-                    self.plot_figures(old_pose, est_pose, particle_states, None)
+                    self.plot_figures(old_pose, est_pose, particle_states, particle_weights)
 
                     # get latest observation
                     old_pose = new_pose
                     observation = new_env_obs['rgb']
-                print(pose_mse, true_state, est_state, covariance, entropy)
+                print('pose mse: {0}, entropy: {1}'.format(pose_mse, entropy.item()))
+                print(' true_pose: {0} \n  est_pose: {1} \n covariance: {2}'.format(true_state, est_state, covariance))
 
 
     def __del__(self):
