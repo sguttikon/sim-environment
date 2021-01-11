@@ -38,6 +38,9 @@ class Render(object):
         self.plot_est_robot(est_pose, 'blue')
         self.plot_particles(particle_states, particle_weights, 'coral')
 
+        self.plt_ax.legend([self.plots['gt_robot']['pose'], self.plots['est_robot']['pose']], \
+            ["gt_robot", "est_robot"])
+
         plt.draw()
         plt.pause(0.00000000001)
 

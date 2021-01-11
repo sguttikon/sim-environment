@@ -384,6 +384,10 @@ class PFNet(object):
                 old_pose = new_pose
                 observation = new_env_obs['rgb']
 
+                # early stop
+                if pose_mse < self.params.stop_threshold[0] and entropy < self.params.stop_threshold[1]:
+                    break
+
             self.writer.add_scalar('training/pose_mse', pose_mse.item(), eps_idx)
             self.writer.add_scalar('training/entropy', entropy.item(), eps_idx)
 
@@ -458,6 +462,10 @@ class PFNet(object):
                     # get latest observation
                     old_pose = new_pose
                     observation = new_env_obs['rgb']
+
+                    # early stop
+                    if pose_mse < self.params.stop_threshold[0] and entropy < self.params.stop_threshold[1]:
+                        break
                 print('pose mse: {0}, entropy: {1}'.format(pose_mse, entropy.item()))
                 print(' true_pose: {0} \n  est_pose: {1} \n covariance: {2}'.format(true_state, est_state, covariance))
 
