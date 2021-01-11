@@ -109,29 +109,19 @@ class Render(object):
 
     def plot_particles(self, particles, particle_weights, clr):
 
-        positions = particles[:, 0:2] * self.map_rows * self.map_res
-        particles_plt = self.plots['est_robot']['particles']
-
         if particle_weights is None:
-            if particles_plt is None:
-                particles_plt = plt.scatter(positions[:, 0], positions[:, 1], s=10, c=clr, alpha=.5)
-            else:
-                particles_plt.set_offsets(positions[:, 0:2])
-            self.plots['est_robot']['particles'] = particles_plt
+            colors = clr
         else:
             colors = cm.rainbow(particle_weights)
-            plts = []
-            idx = 0
-            for pose, c in zip(positions, colors):
-                if particles_plt is None:
-                    s_plt = plt.scatter(pose[0], pose[1], color=c)
-                else:
-                    s_plt = particles_plt[idx]
-                    s_plt.set_offsets(pose)
-                    s_plt.set_color(c)
-                    idx += 1
-                plts.append(s_plt)
-            self.plots['est_robot']['particles'] = plts
+
+        positions = particles[:, 0:2] * self.map_rows * self.map_res
+        particles_plt = self.plots['est_robot']['particles']
+        if particles_plt is None:
+            particles_plt = plt.scatter(positions[:, 0], positions[:, 1], s=10, c=colors, alpha=.5)
+        else:
+            particles_plt.set_offsets(positions[:, 0:2])
+            particles_plt.set_color(colors)
+        self.plots['est_robot']['particles'] = particles_plt
 
     def __del__(self):
         # to prevent plot from automatic closing
