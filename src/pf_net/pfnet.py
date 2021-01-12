@@ -7,6 +7,7 @@ from gibson2.utils.utils import parse_config
 from torch.utils.tensorboard import SummaryWriter
 from scipy.stats import multivariate_normal
 from transforms3d.euler import quat2euler
+from skimage.viewer import ImageViewer
 from torchvision import transforms
 from skimage import io, transform
 from display import Render
@@ -37,29 +38,32 @@ class PFNet(object):
         config_data = parse_config(params.config_filepath)
         self.model_id = config_data['model_id']
         self.pixel_to_mts = config_data['trav_map_resolution'] # each map pixel in meter
+        self.params.pixel_to_mts = self.pixel_to_mts
 
-        self.observation_model = nets.ObservationModel(params)
+        if params.obs_model == 'OBS':
+            self.observation_model = nets.ObservationModel(params)
+            model_params = list(self.observation_model.resnet.parameters()) \
+                         + list(self.observation_model.likelihood_net.parameters())
+        elif params.obs_model == 'OBS_MAP':
+            self.observation_model = nets.MapObservationModel(params)
+            model_params = list(self.observation_model.obs_resnet.parameters()) \
+                         + list(self.observation_model.map_feature_extractor.parameters()) \
+                         + list(self.observation_model.map_obs_feature_extractor.parameters()) \
+                         + list(self.observation_model.spatial_transform_net.parameters()) \
+                         + list(self.observation_model.likelihood_net.parameters())
+
         self.resample = nets.ResamplingModel(params)
         self.transition_model = nets.TransitionModel(params)
-
-        model_params = list(self.observation_model.resnet.parameters()) \
-                        + list(self.observation_model.likelihood_net.parameters()) \
 
         self.optimizer = torch.optim.Adam(model_params, lr=2e-4, weight_decay=4e-6)
         self.train_idx = 0
 
         self.global_floor_map, self.global_travs_map = self.get_env_map(config_data['trav_map_erosion'])
+        layout_map = transform.resize(self.global_floor_map, (256, 256))
+        self.layout_map = torch.from_numpy(layout_map).float().to(self.params.device).unsqueeze(0).unsqueeze(1)
         if params.render:
             self.render = Render()
             self.render.plot_map(self.global_floor_map, self.pixel_to_mts)
-
-            # state, observation = self.init_particles()
-            #
-            # curr_gt_pose = self.get_gt_pose()
-            # self.render.plot_robot(curr_gt_pose, 'green')
-            #
-            # particle_states, particle_weights = state
-            # self.render.plot_particles(particle_states, 'coral')
         else:
             self.render = None
 
@@ -72,32 +76,6 @@ class PFNet(object):
         model = self.params.init_particles_model
 
         gt_pose = self.get_gt_pose()
-
-        # lmt = 0.5
-        # bounds = np.array([
-        #     [gt_pose[0] - lmt, gt_pose[0] + lmt],
-        #     [gt_pose[1] - lmt, gt_pose[1] + lmt],
-        # ])
-        #
-        # cnt = 0
-        # translation_std = self.params.init_particles_std[0]
-        # rotation_std = self.params.init_particles_std[1]
-        #
-        # while cnt < num_particles:
-        #     _, self.initial_pos = self.env.scene.get_random_point_floor(self.env.floor_num, self.env.random_height)#
-        #     self.initial_pos = self.initial_pos + np.random.uniform(0, 1.0, size=self.initial_pos.shape) * translation_std
-        #     self.initial_orn = np.array([0, 0, np.random.uniform(0, np.pi * 2)])
-        #     rnd_pose = [self.initial_pos[0], self.initial_pos[1], self.initial_orn[2]]
-        #
-        #     if bounds[0][0] <= rnd_pose[0] <= bounds[0][1] and \
-        #        bounds[1][0] <= rnd_pose[1] <= bounds[1][1]:
-        #         rnd_particles.append(rnd_pose)
-        #         cnt = cnt + 1
-        #     else:
-        #         continue
-        #
-        # rnd_particles = np.array(rnd_particles)
-        # rnd_particle_weights = np.full(num_particles, np.log(1.0/num_particles))
 
         if model == 'GAUSS':
             mean = gt_pose # [0., 0., 0.]
@@ -197,6 +175,8 @@ class PFNet(object):
         trav_map[floor_map == 0] = 0
         trav_map = cv2.erode(trav_map, np.ones((trav_map_erosion, trav_map_erosion)))
 
+        floor_map = cv2.flip(floor_map, 0)
+
         return floor_map, trav_map
 
     def transform_observation(self, rgb_img):
@@ -245,8 +225,8 @@ class PFNet(object):
         observation, odometry, old_pose = inputs
 
         # observation update
-        if self.params.obs_model:
-            lik = self.observation_model(particle_states, observation)
+        if self.params.learn_obs_model:
+            lik = self.observation_model(particle_states, observation, self.layout_map)
         else:
             mean = old_pose # [0., 0., 0.]
             cov = [[0.5*0.5, 0, 0], [0, 0.5*0.5, 0], [0, 0, np.pi/12*np.pi/12]]
@@ -322,15 +302,31 @@ class PFNet(object):
         self.observation_model.set_eval_mode()
 
     def save(self, file_name):
-        torch.save({
-            'likelihood_net': self.observation_model.likelihood_net.state_dict(),
-            'resnet': self.observation_model.resnet.state_dict(),
-        }, file_name)
+        if self.params.obs_model == 'OBS':
+            torch.save({
+                'likelihood_net': self.observation_model.likelihood_net.state_dict(),
+                'resnet': self.observation_model.resnet.state_dict(),
+            }, file_name)
+        elif self.params.obs_model == 'OBS_MAP':
+            torch.save({
+                'likelihood_net': self.observation_model.likelihood_net.state_dict(),
+                'obs_resnet': self.observation_model.obs_resnet.state_dict(),
+                'map_feature_extractor': self.observation_model.map_feature_extractor.state_dict(),
+                'map_obs_feature_extractor': self.observation_model.map_obs_feature_extractor.state_dict(),
+                'spatial_transform_net': self.observation_model.spatial_transform_net.state_dict(),
+            }, file_name)
         # print('=> created checkpoint')
 
     def load(self, file_name):
         checkpoint = torch.load(file_name)
-        self.observation_model.likelihood_net.load_state_dict(checkpoint['likelihood_net'])
+        if self.params.obs_model == 'OBS':
+            self.observation_model.likelihood_net.load_state_dict(checkpoint['likelihood_net'])
+        elif self.params.obs_model == 'OBS_MAP':
+            self.observation_model.likelihood_net.load_state_dict(checkpoint['likelihood_net'])
+            self.observation_model.obs_resnet.load_state_dict(checkpoint['obs_resnet'])
+            self.observation_model.map_feature_extractor.load_state_dict(checkpoint['map_feature_extractor'])
+            self.observation_model.map_obs_feature_extractor.load_state_dict(checkpoint['map_obs_feature_extractor'])
+            self.observation_model.spatial_transform_net.load_state_dict(checkpoint['spatial_transform_net'])
         # print('=> checkpoint loaded')
 
     def plot_figures(self, gt_pose, est_pose, particle_states, particle_weights):
@@ -468,6 +464,36 @@ class PFNet(object):
                         break
                 print('pose mse: {0}, entropy: {1}'.format(pose_mse, entropy.item()))
                 print(' true_pose: {0} \n  est_pose: {1} \n covariance: {2}'.format(true_state, est_state, covariance))
+
+    def show_local_map(self):
+        state, observation = self.init_particles()
+        old_pose = self.get_gt_pose()
+
+        # preprocess
+        state = self.transform_state(state)
+
+        # plot
+        particle_states, particle_weights = state
+        est_pose, covariance, entropy = self.get_est_pose(particle_states, particle_weights, isTensor=True)
+
+        est_pose = est_pose.squeeze(0).detach().cpu().numpy()
+        particle_states = particle_states.squeeze(0).detach().cpu().numpy()
+        particle_weights = particle_weights.squeeze(0).detach().cpu().numpy()
+        self.plot_figures(old_pose, est_pose, particle_states, particle_weights)
+
+        spatial_transformer = nets.SpatialTransformerNet(self.params)
+
+        true_state = torch.from_numpy(old_pose).float().to(self.params.device)
+        true_state = true_state.unsqueeze(0).unsqueeze(0).unsqueeze(0) # add batch dimension
+
+        particles = state[0].unsqueeze(2).squeeze(0)
+        layout_map = self.layout_map.repeat(particle_states.shape[0], 1, 1, 1)
+        particles_local_map = spatial_transformer(particles, layout_map)
+        print(particles_local_map.shape)
+
+        local_map = particles_local_map[0].squeeze()
+        viewer = ImageViewer(local_map.cpu().detach().numpy())
+        viewer.show()
 
 
     def __del__(self):

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
+from torchvision import models, transforms
 from typing import Iterable, Callable
-from torchvision import models
+import torch.nn.functional as F
 from torch import nn, Tensor
 import numpy as np
 import datautils
@@ -130,9 +131,14 @@ class FeatureExtractor(nn.Module):
 
 class LikelihoodNetwork(nn.Module):
 
-    def __init__(self):
+    def __init__(self, params):
         super(LikelihoodNetwork, self).__init__()
-        self.in_features = 512 + 4
+        self.params = params
+
+        if params.obs_model == 'OBS':
+            self.in_features = 512 + 4
+        elif params.obs_model == 'OBS_MAP':
+            self.in_features = 512
         self.out_features = 1
 
         # model
@@ -168,7 +174,7 @@ class ObservationModel(nn.Module):
             # train resnet
             self.resnet.fc = nn.Identity()
 
-        self.likelihood_net = LikelihoodNetwork().to(self.params.device)
+        self.likelihood_net = LikelihoodNetwork(params).to(self.params.device)
 
     def forward(self, particle_states: Tensor, obs: Tensor) -> Tensor:
         if self.params.pretrained_model:
@@ -252,6 +258,103 @@ class ResamplingModel(nn.Module):
         particle_weights = particle_weights[indices].view(batch_size, num_particles)
 
         return particle_states, particle_weights
+
+# reference https://pytorch.org/tutorials/intermediate/spatial_transformer_tutorial.html
+class SpatialTransformerNet(nn.Module):
+
+    def __init__(self, params):
+        super(SpatialTransformerNet, self).__init__()
+        self.params = params
+        self.img_transforms = torch.nn.Sequential(
+            transforms.CenterCrop(56),
+        )
+
+    def forward(self, particle_states: Tensor, layout_map: Tensor) -> Tensor:
+
+        pose_x, pose_y, pose_th = torch.unbind(particle_states, dim=-1)
+        pose_th = helpers.normalize(pose_th, isTensor=True)
+
+        # affine transformation
+        scale = 2 * self.params.pixel_to_mts
+        t_x = pose_x * scale
+        t_y = -pose_y * scale
+        r_c = torch.cos(pose_th)
+        r_s = torch.sin(pose_th)
+
+        particles_theta = torch.cat([r_c, r_s, t_x, -r_s, r_c, t_y], axis=-1)
+        grid_size = torch.Size((1, layout_map.shape[1], layout_map.shape[2], layout_map.shape[3]))
+        particles_local_map = []
+
+        # iterate per particles
+        for idx in range(particles_theta.shape[0]):
+            theta = particles_theta[idx].view(-1, 2, 3)
+            grid = F.affine_grid(theta, grid_size, align_corners=False).float()
+
+            local_map = F.grid_sample(layout_map, grid, align_corners=False)
+            particles_local_map.append(local_map)
+        particles_local_map = torch.cat(particles_local_map, dim=0)
+
+        # image transformations
+        particles_local_map = self.img_transforms(particles_local_map)
+
+        return particles_local_map
+
+class MapObservationModel(nn.Module):
+
+    def __init__(self, params):
+        super(MapObservationModel, self).__init__()
+
+        self.params = params
+        self.obs_resnet = models.resnet34(pretrained=True).to(self.params.device)
+        self.map_resnet = models.resnet34(pretrained=True).to(self.params.device)
+        self.resnet_modules = list(self.map_resnet.children())
+
+        layers = ['layer3', 'layer4', 'avgpool']
+        self.obs_feature_extractor = FeatureExtractor(self.obs_resnet, layers).to(self.params.device)
+
+        layers = [nn.Conv2d(1, 3, kernel_size=3, stride=1, padding=1)]
+        layers.extend(self.resnet_modules[:5])
+        self.map_feature_extractor = nn.Sequential(*layers).to(self.params.device)
+
+        layers = [nn.Conv2d(320, 256, kernel_size=3, stride=2, padding=1)]
+        layers.extend(self.resnet_modules[7:9])
+        self.map_obs_feature_extractor = nn.Sequential(*layers).to(self.params.device)
+
+        self.spatial_transform_net = SpatialTransformerNet(params).to(self.params.device)
+        self.likelihood_net = LikelihoodNetwork(params).to(self.params.device)
+
+    def forward(self, particle_states: Tensor, observation: Tensor, layout_map: Tensor) -> Tensor:
+        particle_states = particle_states.unsqueeze(2).squeeze(0)
+
+        img_features = self.obs_feature_extractor(observation)['layer3']
+        p_img_features = img_features.repeat(particle_states.shape[0], 1, 1, 1)
+
+        p_local_maps = self.spatial_transform_net(particle_states, layout_map)
+        p_map_features = self.map_feature_extractor(p_local_maps)
+
+        concat_features = torch.cat([p_img_features, p_map_features], dim=1)
+        p_map_obs_features = self.map_obs_feature_extractor(concat_features).view(observation.shape[0], particle_states.shape[0], -1)
+
+        lik = self.likelihood_net(p_map_obs_features)
+        return lik
+
+    def set_train_mode(self):
+        self.obs_resnet.train()
+        self.map_resnet.train()
+        self.likelihood_net.train()
+        self.spatial_transform_net.train()
+        self.obs_feature_extractor.train()
+        self.map_feature_extractor.train()
+        self.map_obs_feature_extractor.train()
+
+    def set_eval_mode(self):
+        self.obs_resnet.eval()
+        self.map_resnet.eval()
+        self.likelihood_net.eval()
+        self.spatial_transform_net.eval()
+        self.obs_feature_extractor.eval()
+        self.map_feature_extractor.eval()
+        self.map_obs_feature_extractor.eval()
 
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser()

@@ -44,17 +44,17 @@ class Render(object):
         plt.draw()
         plt.pause(0.00000000001)
 
-    def plot_map(self, map, map_res):
+    def plot_map(self, floor_map, floor_map_res):
 
-        rows, cols = map.shape
-        self.map_res = map_res
+        rows, cols = floor_map.shape
+        self.map_res = floor_map_res
         self.map_rows = rows
 
         extent = [-cols/2, cols/2, -rows/2, rows/2]
 
         map_plt = self.plots['map']
         if map_plt is None:
-            floor_map = cv2.flip(map, 0)
+            # floor_map = cv2.flip(floor_map, 0)
             map_plt = self.plt_ax.imshow(floor_map, origin='upper', extent=extent)
 
             self.plt_ax.grid()
