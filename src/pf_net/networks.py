@@ -327,13 +327,18 @@ class MapObservationModel(nn.Module):
         particle_states = particle_states.unsqueeze(2).squeeze(0)
 
         img_features = self.obs_feature_extractor(observation)['layer3']
+        # p_img_features: [num_particles, 256, 14, 14]
         p_img_features = img_features.repeat(particle_states.shape[0], 1, 1, 1)
 
         p_local_maps = self.spatial_transform_net(particle_states, layout_map)
+        # p_map_features: [num_particles, 64, 14, 14]
         p_map_features = self.map_feature_extractor(p_local_maps)
 
+        # concat_features: [num_particles, 320, 14, 14]
         concat_features = torch.cat([p_img_features, p_map_features], dim=1)
         p_map_obs_features = self.map_obs_feature_extractor(concat_features).view(observation.shape[0], particle_states.shape[0], -1)
+
+        # p_map_obs_features: [num_particles, 512]
 
         lik = self.likelihood_net(p_map_obs_features)
         return lik

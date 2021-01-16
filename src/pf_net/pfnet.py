@@ -40,11 +40,11 @@ class PFNet(object):
         self.pixel_to_mts = config_data['trav_map_resolution'] # each map pixel in meter
         self.params.pixel_to_mts = self.pixel_to_mts
 
-        if params.obs_model == 'OBS':
+        if self.params.obs_model == 'OBS':
             self.observation_model = nets.ObservationModel(params)
             model_params = list(self.observation_model.resnet.parameters()) \
                          + list(self.observation_model.likelihood_net.parameters())
-        elif params.obs_model == 'OBS_MAP':
+        elif self.params.obs_model == 'OBS_MAP':
             self.observation_model = nets.MapObservationModel(params)
             model_params = list(self.observation_model.obs_resnet.parameters()) \
                          + list(self.observation_model.map_feature_extractor.parameters()) \
@@ -226,7 +226,10 @@ class PFNet(object):
 
         # observation update
         if self.params.learn_obs_model:
-            lik = self.observation_model(particle_states, observation, self.layout_map)
+            if self.params.obs_model == 'OBS':
+                lik = self.observation_model(particle_states, observation)
+            elif self.params.obs_model == 'OBS_MAP':
+                lik = self.observation_model(particle_states, observation, self.layout_map)
         else:
             mean = old_pose # [0., 0., 0.]
             cov = [[0.5*0.5, 0, 0], [0, 0.5*0.5, 0], [0, 0, np.pi/12*np.pi/12]]
@@ -424,8 +427,12 @@ class PFNet(object):
                     # take action in environment
                     if self.params.manual_action:
                         # manual
-                        value = input("\n 0: Forward, 2: Right, 3:Left - ")
-                        action = int(value)
+                        value = input("\n step:{0} 0: Forward, 2: Right, 3:Left - ".format(eps_step))
+                        try:
+                            action = int(value)
+                        except:
+                            print("Invalid Input")
+                            action = 0
                     else:
                         # random
                         action = self.env.action_space.sample()
@@ -488,7 +495,7 @@ class PFNet(object):
 
         particles = state[0].unsqueeze(2).squeeze(0)
         layout_map = self.layout_map.repeat(particle_states.shape[0], 1, 1, 1)
-        particles_local_map = spatial_transformer(particles, layout_map)
+        particles_local_map = spatial_transformer(true_state, self.layout_map)
         print(particles_local_map.shape)
 
         local_map = particles_local_map[0].squeeze()
