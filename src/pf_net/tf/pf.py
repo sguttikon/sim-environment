@@ -11,8 +11,10 @@ import torch.nn.functional as F
 from torch import nn, Tensor
 import tensorflow as tf
 import numpy as np
+import argparse
 import torch
 import cv2
+import os
 
 test_data_size = 820
 train_data_size = 74800
@@ -131,7 +133,7 @@ class House3DTrajDataset(Dataset):
     def random_particles(self, init_state, seed):
         particles = np.zeros((self.params.num_particles, 3), np.float32)
 
-        if self.params.init_particles_distr == 'tracking':
+        if self.params.init_particles_distr == 'gaussian':
             # fix seed
             if seed is not None:
                 random_state = np.random.get_state()
@@ -777,18 +779,31 @@ def plot_grad_flow(named_parameters):
     plt.show()
 
 if __name__ == '__main__':
+    argparser = argparse.ArgumentParser()
+    params = argparser.parse_args()
+    params.num_epochs = 1
+    params.batch_size = 4
+    params.num_particles = 30
+    params.trajlen = 24
+    params.map_pixel_in_meters = 0.02
+    params.init_particles_distr = 'gaussian'
+    params.init_particles_std = [0.3, 0.523599]  # 30cm, 30degrees
+    params.seed = 42
+
+    params.device = torch.device('cpu')
+    os.environ['CUDA_VISIBLE_DEVICES'] = '-1' # tensorflow
 
     file = '../data/valid.tfrecords'
 
     composed = transforms.Compose([
                 ToTensor(),
     ])
-    house_dataset = House3DTrajDataset(file, transform=composed)
+    house_dataset = House3DTrajDataset(params, file, transform=composed)
     house_data_loader = DataLoader(house_dataset, batch_size=4, shuffle=True, num_workers=0)
 
-    transition_model = TransitionModel()
+    transition_model = TransitionModel(params)
     observation_model = ObservationModel()
-    trans_map_model = SpatialTransformerNet()
+    trans_map_model = SpatialTransformerNet(params)
     map_model = MapModel()
     likeli_net = LikelihoodNet()
 
