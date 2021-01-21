@@ -21,7 +21,7 @@ class PFNet(object):
                     pf.ToTensor(),
         ])
         train_dataset = pf.House3DTrajDataset(params, params.train_file, transform=composed)
-        self.train_data_loader = pf.DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=0)
+        self.train_data_loader = pf.DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
 
         self.pf_cell = pf.PFCell(params).to(params.device)
 
@@ -106,6 +106,10 @@ class PFNet(object):
                 b_loss_coords.append(loss_coords)
                 print('epoch: {0}, batch: {1}, loss_coords: {2}, loss_total: {3}'.format(epoch, batch_idx, loss_coords, loss_total))
 
+                # log per batch stats
+                self.writer.add_scalar('training/mean_loss_total_eps{0}'.format(epoch), np.mean(loss_total), batch_idx)
+                self.writer.add_scalar('training/mean_loss_coords_eps{0}'.format(epoch), np.mean(loss_coords), batch_idx)
+
             # log per epoch mean stats
             self.writer.add_scalar('training/mean_loss_total', np.mean(b_loss_total), epoch)
             self.writer.add_scalar('training/mean_loss_coords', np.mean(b_loss_coords), epoch)
@@ -176,9 +180,13 @@ if __name__ == '__main__':
     argparser = argparse.ArgumentParser()
 
     argparser.add_argument('--train_file', type=str, default='../data/valid.tfrecords', help='path to the training .tfrecords')
+    argparser.add_argument('--type', type=str, default='valid', help='type of .tfrecords')
     argparser.add_argument('--num_epochs', type=int, default=20, help='number of epochs to train')
     argparser.add_argument('--batch_size', type=int, default=4, help='batch size used for training')
+    argparser.add_argument('--num_workers', type=int, default=0, help='workers used for data loading')
     argparser.add_argument('--num_particles', type=int, default=30, help='number of particles used for training')
+    argparser.add_argument('--transition_std', nargs='*', default=[0, 0], help='error in motion execution')
+    argparser.add_argument('--local_map_size', nargs='*', default=(28, 28), help='shape of local map')
     argparser.add_argument('--use_cpu', type=str2bool, nargs='?', const=True, default=False, help='cpu training')
     argparser.add_argument('--seed', type=int, default=42, help='random seed')
 

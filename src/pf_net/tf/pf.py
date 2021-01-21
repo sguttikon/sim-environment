@@ -11,8 +11,10 @@ import torch.nn.functional as F
 from torch import nn, Tensor
 import tensorflow as tf
 import numpy as np
+import argparse
 import torch
 import cv2
+import os
 
 test_data_size = 820
 train_data_size = 74800
@@ -34,6 +36,8 @@ class House3DTrajDataset(Dataset):
             particle_std[0] = particle_std[0] / params.map_pixel_in_meters
             particle_var = np.square(particle_std)  # variance
             self.params.init_particles_cov = np.diag(particle_var[(0, 0, 1),]) # 3x3 matrix
+        else:
+            assert False
 
         self.map_shape = (3000, 3000, 1)
 
@@ -50,13 +54,17 @@ class House3DTrajDataset(Dataset):
         self.transform = transform
 
     def __len__(self):
-        return valid_data_size
+        if self.params.type == 'valid':
+            return valid_data_size
+        elif self.params.type == 'test':
+            return test_data_size
+        elif self.params.type == 'train':
+            return train_data_size
 
     def __getitem__(self, idx):
 
         if torch.is_tensor(idx):
             idx = idx.tolist()
-        idx = 287
 
         # get idx element
         dataset = self.raw_dataset.skip(idx).take(1)
@@ -76,11 +84,10 @@ class House3DTrajDataset(Dataset):
         # input global map is a concatenation of semantic channels
         global_map = np.concatenate(global_map_list, axis=-1)
 
-        # # pad to have same global map size
-        # shape = global_map.shape
-        # new_global_map = np.zeros(self.map_shape, dtype=np.float32)
-        # new_global_map[:shape[0], :shape[1], :shape[2]] = global_map
-        new_global_map = global_map
+        # pad to have same global map size
+        shape = global_map.shape
+        new_global_map = np.zeros(self.map_shape, dtype=np.float32)
+        new_global_map[:shape[0], :shape[1], :shape[2]] = global_map
 
         # process true states
         true_states = features['states'].bytes_list.value[0]
@@ -99,6 +106,7 @@ class House3DTrajDataset(Dataset):
         # process observations
         observation = self.raw_images_to_array(list(features['rgb'].bytes_list.value)[:self.params.trajlen])
 
+        # compute random init particles
         init_particles = self.random_particles(true_states[0], seed=self.get_sample_seed(self.params.seed, idx))
 
         sample = {}
@@ -131,7 +139,7 @@ class House3DTrajDataset(Dataset):
     def random_particles(self, init_state, seed):
         particles = np.zeros((self.params.num_particles, 3), np.float32)
 
-        if self.params.init_particles_distr == 'tracking':
+        if self.params.init_particles_distr == 'gaussian':
             # fix seed
             if seed is not None:
                 random_state = np.random.get_state()
@@ -146,6 +154,8 @@ class House3DTrajDataset(Dataset):
 
             # sample particles from gaussian centered around the offset
             particles = np.random.multivariate_normal(mean=center, cov=self.params.init_particles_cov, size=self.params.num_particles)
+        else:
+            assert False
 
         return particles
 
@@ -289,13 +299,11 @@ class TransitionModel(nn.Module):
     def __init__(self, params):
         super(TransitionModel, self).__init__()
         self.params = params
-        self.transition_std = [0, 0]
-        self.map_pixel_in_meters = 0.02
 
     def forward(self, particle_states: Tensor, odometry: Tensor) -> Tensor:
 
-        translation_std = self.transition_std[0] / self.map_pixel_in_meters  # in pixels
-        rotation_std = self.transition_std[1]  # in radians
+        translation_std = self.params.transition_std[0] / self.params.map_pixel_in_meters  # in pixels
+        rotation_std = self.params.transition_std[1]  # in radians
 
         part_x, part_y, part_th = torch.unbind(particle_states, dim=-1)
 
@@ -609,7 +617,6 @@ class SpatialTransformerNet(nn.Module):
     def __init__(self, params):
         super(SpatialTransformerNet, self).__init__()
         self.params = params
-        self.local_map_size = (28, 28)
 
     def forward(self, particle_states: Tensor, global_maps: Tensor) -> Tensor:
 
@@ -639,38 +646,33 @@ class SpatialTransformerNet(nn.Module):
         rotm = torch.stack([costheta, sintheta, zero, -sintheta, costheta, zero, zero, zero, one], axis=1)
         rotm = torch.reshape(rotm, (total_samples, 3, 3))
 
-        # # 3. optional scale down the map
-        # window_scaler = 8
-        # scale_x = torch.full((total_samples, ), float(self.local_map_size[0] * window_scaler) * width_inverse)
-        # scale_y = torch.full((total_samples, ), float(self.local_map_size[1] * window_scaler) * height_inverse)
-        # scalem = torch.stack([scale_x, zero, zero, zero, scale_y, zero, zero, zero, one], axis=1)
-        # scalem = torch.reshape(scalem, (total_samples, 3, 3))
-        #
+        # 3. optional scale down the map
+        window_scaler = 8
+        scale_x = torch.full((total_samples, ), float(self.params.local_map_size[0] * window_scaler) * width_inverse)
+        scale_y = torch.full((total_samples, ), float(self.params.local_map_size[1] * window_scaler) * height_inverse)
+        scalem = torch.stack([scale_x, zero, zero, zero, scale_y, zero, zero, zero, one], axis=1)
+        scalem = torch.reshape(scalem, (total_samples, 3, 3))
+
         # # 4, optional translate the local map s.t. the particle defines the bottom mid-point instead of the center
         # translate_y2 = torch.full((total_samples, ), -1.0)
         # transm2 = torch.stack([one, zero, zero, zero, one, translate_y2, zero, zero, one], axis=1)
         # transm2 = torch.reshape(transm2, (total_samples, 3, 3))
 
         # chain the transormation matrices
-        #transform_m = torch.matmul(torch.matmul(torch.matmul(transm1, rotm), scalem), transm2)
-        transform_m = torch.matmul(transm1, rotm)
+        transform_m = torch.matmul(transm1, rotm)   # translate and rotation
+        transform_m = torch.matmul(transform_m, scalem) # scale
+        # transform_m = torch.matmul(transform_m, transm2)
 
         # reshape to the format expected by the spatial transform network
         transform_m = torch.reshape(transform_m[:, :2], (batch_size, num_particles, 2, 3))
 
-        # resize and center crop tranformation
-        img_transform = torch.nn.Sequential(
-            transforms.Resize((self.local_map_size[0]*8, self.local_map_size[1]*8)),
-            transforms.CenterCrop(self.local_map_size),
-        )
-
         output_list = []
         # iterate over num_particles
         for i in range(num_particles):
-            grid_size = torch.Size((batch_size, input_map_shape[1], input_map_shape[2], input_map_shape[3]))
+            grid_size = torch.Size((batch_size, input_map_shape[1], self.params.local_map_size[0], self.params.local_map_size[1]))
             grid = F.affine_grid(transform_m[:, i], grid_size, align_corners=False).float()
             local_map = F.grid_sample(global_maps, grid, align_corners=False)
-            output_list.append(img_transform(local_map))
+            output_list.append(local_map)
         local_maps = torch.stack(output_list, axis=1)
 
         return local_maps # [batch_size, num_particles, 1, 28, 28]
@@ -777,18 +779,34 @@ def plot_grad_flow(named_parameters):
     plt.show()
 
 if __name__ == '__main__':
+    argparser = argparse.ArgumentParser()
+    params = argparser.parse_args()
+    params.num_epochs = 1
+    params.batch_size = 1
+    params.num_particles = 30
+    params.trajlen = 24
+    params.map_pixel_in_meters = 0.02
+    params.init_particles_distr = 'gaussian'
+    params.init_particles_std = [0.3, 0.523599]  # 30cm, 30degrees
+    params.transition_std = [0, 0]
+    params.local_map_size = (28, 28)
+    params.seed = 42
+    params.type = 'valid'
+
+    params.device = torch.device('cpu')
+    os.environ['CUDA_VISIBLE_DEVICES'] = '-1' # tensorflow
 
     file = '../data/valid.tfrecords'
 
     composed = transforms.Compose([
                 ToTensor(),
     ])
-    house_dataset = House3DTrajDataset(file, transform=composed)
-    house_data_loader = DataLoader(house_dataset, batch_size=4, shuffle=True, num_workers=0)
+    house_dataset = House3DTrajDataset(params, file, transform=composed)
+    house_data_loader = DataLoader(house_dataset, batch_size=params.batch_size, shuffle=True, num_workers=0)
 
-    transition_model = TransitionModel()
+    transition_model = TransitionModel(params)
     observation_model = ObservationModel()
-    trans_map_model = SpatialTransformerNet()
+    trans_map_model = SpatialTransformerNet(params)
     map_model = MapModel()
     likeli_net = LikelihoodNet()
 
@@ -809,6 +827,27 @@ if __name__ == '__main__':
         batch_size, trajlen = observations.shape[:2]
         num_particles = particle_states.shape[1]
         for traj in range(trajlen):
+
+            # visualize local map
+            
+            particle_state = labels[0, 0]
+            particle_state[2] = 0
+            global_map = global_maps[0, 0]
+
+            local_maps = trans_map_model(particle_state.unsqueeze(0).unsqueeze(0), global_map.unsqueeze(0).unsqueeze(0))
+            local_map = local_maps[0, 0, 0]
+
+            x, y, _ = particle_state
+            pose_plt = Wedge((x, y), 10, 0, 360, color='red', alpha=.75)
+            plt_ax.add_artist(pose_plt)
+            map_plt = plt_ax.imshow(global_map)
+
+            # x, y = global_map.shape[0]/2, global_map.shape[1]/2
+            # pose_plt = Wedge((x, y), 10, 0, 360, color='red', alpha=.75)
+            # plt_ax.add_artist(pose_plt)
+            # map_plt = plt_ax.imshow(local_map)
+
+            plt.show()
 
             # observation update
 
