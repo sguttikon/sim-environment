@@ -829,7 +829,7 @@ if __name__ == '__main__':
         for traj in range(trajlen):
 
             # visualize local map
-            
+
             particle_state = labels[0, 0]
             particle_state[2] = 0
             global_map = global_maps[0, 0]
