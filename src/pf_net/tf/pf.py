@@ -25,25 +25,17 @@ plt_ax = fig.add_subplot(111)
 
 class House3DTrajDataset(Dataset):
 
-    def __init__(self, file, transform=None):
-        self.init_particles_distr = 'tracking'
-        self.trajlen = 24
-        self.seg_trajlen = 4
-        self.num_segments = self.trajlen // self.seg_trajlen
-        self.obsmode = 'rgb'
-        self.num_particles = 30
+    def __init__(self, params, file, transform=None):
+        self.params = params
 
         # build initial covariance matrix of particles, in pixels and radians
-        self.init_particles_std = [0.3, 0.523599]  #30cm, 30degrees
-        self.map_pixel_in_meters = 0.02
-
-        particle_std = self.init_particles_std.copy()
-        particle_std[0] = particle_std[0] / self.map_pixel_in_meters
-        particle_var = np.square(particle_std)  # variance
-        self.init_particles_cov = np.diag(particle_var[(0, 0, 1),]) # 3x3 matrix
+        if params.init_particles_distr == 'gaussian':
+            particle_std = params.init_particles_std.copy()
+            particle_std[0] = particle_std[0] / params.map_pixel_in_meters
+            particle_var = np.square(particle_std)  # variance
+            self.params.init_particles_cov = np.diag(particle_var[(0, 0, 1),]) # 3x3 matrix
 
         self.map_shape = (3000, 3000, 1)
-        self.seed = 42
 
         self.raw_dataset = tf.data.TFRecordDataset(file)
         # self.raw_dataset_itr = list(self.raw_dataset.as_numpy_iterator())
@@ -96,21 +88,18 @@ class House3DTrajDataset(Dataset):
 
         # trajectory may be longer than what we use for training
         data_trajlen = true_states.shape[0]
-        assert data_trajlen >= self.trajlen
-        true_states = true_states[:self.trajlen]
+        assert data_trajlen >= self.params.trajlen
+        true_states = true_states[:self.params.trajlen]
 
         # process odometry
         odometry = features['odometry'].bytes_list.value[0]
         odometry = np.frombuffer(odometry, np.float32).reshape((-1, 3))
-        odometry = odometry[:self.trajlen]
+        odometry = odometry[:self.params.trajlen]
 
         # process observations
-        if 'rgb' in self.obsmode:
-            observation = self.raw_images_to_array(list(features['rgb'].bytes_list.value)[:self.trajlen])
+        observation = self.raw_images_to_array(list(features['rgb'].bytes_list.value)[:self.params.trajlen])
 
-        init_particles = self.random_particles(true_states[0], self.init_particles_distr, \
-                                self.init_particles_cov, self.num_particles, \
-                                seed=self.get_sample_seed(self.seed, idx))
+        init_particles = self.random_particles(true_states[0], seed=self.get_sample_seed(self.params.seed, idx))
 
         sample = {}
         sample['true_states'] = true_states # np.array(np.split(true_states, self.num_segments))
@@ -139,24 +128,24 @@ class House3DTrajDataset(Dataset):
     def get_sample_seed(self, seed, data_i):
         return (None if (seed is None or seed == 0) else ((data_i + 1) * 113 + seed))
 
-    def random_particles(self, init_state, init_particles_distr, init_particles_cov, num_particles, seed):
-        particles = np.zeros((num_particles, 3), np.float32)
+    def random_particles(self, init_state, seed):
+        particles = np.zeros((self.params.num_particles, 3), np.float32)
 
-        if init_particles_distr == 'tracking':
+        if self.params.init_particles_distr == 'tracking':
             # fix seed
             if seed is not None:
                 random_state = np.random.get_state()
                 np.random.seed(seed)
 
             # sample offset from the gaussian
-            center = np.random.multivariate_normal(mean=init_state, cov=init_particles_cov)
+            center = np.random.multivariate_normal(mean=init_state, cov=self.params.init_particles_cov)
 
             # restore random seed
             if seed is not None:
                 np.random.set_state(random_state)
 
             # sample particles from gaussian centered around the offset
-            particles = np.random.multivariate_normal(mean=center, cov=init_particles_cov, size=num_particles)
+            particles = np.random.multivariate_normal(mean=center, cov=self.params.init_particles_cov, size=self.params.num_particles)
 
         return particles
 
@@ -198,9 +187,9 @@ class House3DTrajDataset(Dataset):
 
         rgb = self.raw_images_to_array(list(features['rgb'].bytes_list.value))
 
-        init_particles = self.random_particles(true_states[0], self.init_particles_distr, \
-                            self.init_particles_cov, self.num_particles, \
-                            seed=self.get_sample_seed(self.seed, idx))
+        init_particles = self.random_particles(true_states[0], self.params.init_particles_distr, \
+                            self.params.init_particles_cov, self.params.num_particles, \
+                            seed=self.get_sample_seed(self.params.seed, idx))
 
         plt_ax.imshow(map_wall.transpose(), cmap='Greys',  interpolation='nearest')
 

@@ -5,10 +5,12 @@ from torchvision import transforms
 from pathlib import Path
 import numpy as np
 import argparse
+import random
 import torch
 import pf
 import os
 
+np.set_printoptions(precision=5, suppress=True)
 Path("saved_models").mkdir(parents=True, exist_ok=True)
 
 class PFNet(object):
@@ -18,8 +20,8 @@ class PFNet(object):
         composed = transforms.Compose([
                     pf.ToTensor(),
         ])
-        house_dataset = pf.House3DTrajDataset(params.file, transform=composed)
-        self.house_data_loader = pf.DataLoader(house_dataset, batch_size=params.batch_size, shuffle=True, num_workers=0)
+        train_dataset = pf.House3DTrajDataset(params, params.train_file, transform=composed)
+        self.train_data_loader = pf.DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=0)
 
         self.pf_cell = pf.PFCell(params).to(params.device)
 
@@ -74,7 +76,7 @@ class PFNet(object):
             b_loss_coords = []
             self.set_train_mode()
             # iterate over num_batches
-            for batch_idx, batch_samples in enumerate(self.house_data_loader):
+            for batch_idx, batch_samples in enumerate(self.train_data_loader):
                 episode_batch = batch_samples
                 labels = episode_batch['true_states'].to(params.device)
 
@@ -166,22 +168,42 @@ class PFNet(object):
         self.load(file_name)
         self.set_eval_mode()
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser()
+
+    argparser.add_argument('--train_file', type=str, default='../data/valid.tfrecords', help='path to the training .tfrecords')
+    argparser.add_argument('--num_epochs', type=int, default=20, help='number of epochs to train')
+    argparser.add_argument('--batch_size', type=int, default=4, help='batch size used for training')
+    argparser.add_argument('--num_particles', type=int, default=30, help='number of particles used for training')
+    argparser.add_argument('--use_cpu', type=str2bool, nargs='?', const=True, default=False, help='cpu training')
+    argparser.add_argument('--seed', type=int, default=42, help='random seed')
+
     params = argparser.parse_args()
 
-    if not torch.cuda.is_available():
+    print("#########################")
+    print(params)
+    print("#########################")
+
+    if not params.use_cpu and torch.cuda.is_available():
         params.device = torch.device('cuda')
     else:
         params.device = torch.device('cpu')
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1' # tensorflow
 
-    params.file = '../data/valid.tfrecords'
-    params.num_epochs = 20
-    params.batch_size = 4
     params.trajlen = 24
-    params.num_particles = 30
     params.map_pixel_in_meters = 0.02
+    params.init_particles_distr = 'gaussian'
+    params.init_particles_std = [0.3, 0.523599]  # 30cm, 30degrees
+
+    # set common seed value
+    torch.cuda.manual_seed(params.seed)
+    torch.manual_seed(params.seed)
+    np.random.seed(params.seed)
+    random.seed(params.seed)
 
     pf_net = PFNet(params)
 
