@@ -59,7 +59,7 @@ class Render(object):
 
             self.plt_ax.grid()
             self.plt_ax.set_xlabel('x coords')
-            self.plt_ax.set_ylabel('x coords')
+            self.plt_ax.set_ylabel('y coords')
         else:
             pass
 

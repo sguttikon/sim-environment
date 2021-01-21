@@ -4,3 +4,4 @@ bckp
 events*
 *.pt
 *.pth
+*.tfrecord*

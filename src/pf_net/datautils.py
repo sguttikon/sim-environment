@@ -18,6 +18,23 @@ def transform_poses(particles):
     trans_particles = torch.stack(trans_particles)
     return trans_particles
 
+def wrap_angle(angle):
+    return np.arctan2(np.sin(angle), np.cos(angle))
+
+def sample_motion_odometry(old_pose, odometry):
+    x1, y1, th1 = old_pose
+    odom_x, odom_y, odom_th = odometry
+
+    sin = np.sin(th1)
+    cos = np.cos(th1)
+
+    x2 = x1 + (cos * odom_x - sin * odom_y)
+    y2 = y1 + (sin * odom_x + cos * odom_y)
+    th2 = wrap_angle(th1 + odom_th)
+
+    new_pose = np.array([x2, y2, th2])
+    return new_pose
+
 def calc_odometry(old_pose, new_pose):
     x1, y1, th1 = old_pose
     x2, y2, th2 = new_pose
@@ -29,7 +46,7 @@ def calc_odometry(old_pose, new_pose):
 
     odom_th = wrap_angle(th2 - th1)
     odom_x = cos * abs_x + sin * abs_y
-    odom_y = sin * abs_x - cos * abs_y
+    odom_y = cos * abs_y - sin * abs_x
 
     odometry = np.array([odom_x, odom_y, odom_th])
     return odometry
