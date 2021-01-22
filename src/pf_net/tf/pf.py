@@ -631,16 +631,16 @@ class SpatialTransformerNet(nn.Module):
         width_inverse = 1.0 / input_map_shape[3]
 
         # 1. translate the global map s.t. the center is at the particle state
-        translate_x = (flat_states[:, 0] * width_inverse * 2.0) - 1.0
-        translate_y = (flat_states[:, 1] * height_inverse * 2.0) - 1.0
+        translate_x = ((flat_states[:, 0] * width_inverse * 2.0) - 1.0).to(self.params.device)
+        translate_y = ((flat_states[:, 1] * height_inverse * 2.0) - 1.0).to(self.params.device)
         transm1 = torch.stack([one, zero, translate_x, zero, one, translate_y, zero, zero, one], axis=1)
         transm1 = torch.reshape(transm1, (total_samples, 3, 3))
 
         # 2. rotate the global map s.t. the oriantation matches the particle state
         # normalize orientations
         theta = normalize(flat_states[:, 2], isTensor=True)
-        costheta = torch.cos(theta)
-        sintheta = torch.sin(theta)
+        costheta = torch.cos(theta).to(self.params.device)
+        sintheta = torch.sin(theta).to(self.params.device)
         rotm = torch.stack([costheta, sintheta, zero, -sintheta, costheta, zero, zero, zero, one], axis=1)
         rotm = torch.reshape(rotm, (total_samples, 3, 3))
 
@@ -771,7 +771,7 @@ class PFCell(nn.Module):
 
         # observation update
         lik = self.observation_update(global_maps, particle_states, observation)
-        particle_weights += lik  # unnormalized
+        particle_weights = particle_weights + lik  # unnormalized
 
         # resample
         if self.params.resample:

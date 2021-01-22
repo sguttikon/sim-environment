@@ -82,7 +82,7 @@ class PFNet(object):
 
         self.params.batch_size //= self.params.device_count
         if params.multiple_gpu:
-            model = torch.nn.DataParallel(model)
+            model = torch.nn.DataParallel(model, device_ids=range(torch.cuda.device_count()), output_device=self.params.device)
         model.to(self.params.device)
 
         # define optimizer
