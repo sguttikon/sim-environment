@@ -21,8 +21,6 @@ class PFNet(object):
 
     def run_episode(self, model, episode_batch):
         trajlen = self.params.trajlen
-        batch_size = self.params.batch_size
-        num_particles = self.params.num_particles
 
         odometries = episode_batch['odometry']
         global_maps = episode_batch['global_map']
@@ -56,7 +54,8 @@ class PFNet(object):
 
     def preprocess_data(self, batch_samples):
         episode_batch = batch_samples
-        episode_batch['init_particle_weights'] = torch.full((self.params.batch_size, self.params.num_particles), np.log(1.0/float(self.params.num_particles)))
+        batch_size, num_particles = episode_batch['init_particles'].shape[:2]
+        episode_batch['init_particle_weights'] = torch.full((batch_size, num_particles), np.log(1.0/num_particles))
 
         if not self.params.use_cpu:
             episode_batch['odometry'] = episode_batch['odometry'].cuda()

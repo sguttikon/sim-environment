@@ -774,12 +774,11 @@ class PFCell(nn.Module):
         self.likeli_net = LikelihoodNet()
 
     def forward(self, inputs, state):
-        batch_size = self.params.batch_size
-        num_particles = self.params.num_particles
         particle_states, particle_weights = state
         observation, odometry, global_maps = inputs
 
         # sanity check
+        batch_size, num_particles = particle_states.shape[:2]
         assert list(particle_states.shape) == [batch_size, num_particles, 3]
         assert list(particle_weights.shape) == [batch_size, num_particles]
         assert list(global_maps.shape) == [batch_size, 1, 3000, 3000]
@@ -806,8 +805,7 @@ class PFCell(nn.Module):
         return outputs, state
 
     def observation_update(self, global_maps, particle_states, observation):
-        batch_size = self.params.batch_size
-        num_particles = self.params.num_particles
+        batch_size, num_particles = particle_states.shape[:2]
 
         # [batch_size, K, 3], [batch_size, C, H, W]
         local_maps = self.trans_map_model(particle_states, global_maps)
