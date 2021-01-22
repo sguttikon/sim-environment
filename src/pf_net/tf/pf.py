@@ -675,6 +675,75 @@ class SpatialTransformerNet(nn.Module):
 
         return local_maps # [batch_size, num_particles, 1, 28, 28]
 
+class ResampleNet(nn.Module):
+
+    def __init__(self, params):
+        super(ResampleNet, self).__init__()
+        self.params = params
+
+    def forward(self, particle_states: Tensor, particle_weights: Tensor, alpha: int) -> Tensor:
+
+        assert 0.0 < alpha <= 1.0
+        batch_size, num_particles = particle_states.shape[:2]
+
+        # normalize
+        particle_weights = particle_weights - torch.logsumexp(particle_weights, dim=-1, keepdim=True)
+
+        # construct uniform weights
+        uniform_weights = torch.full((batch_size, num_particles), np.log(1.0/float(num_particles))).to(self.params.device)
+
+        # build sampling distribution q(s) and update particle weights
+        if alpha < 1.0:
+            # soft resampling
+            q_weights = torch.stack([particle_weights + np.log(alpha), uniform_weights + np.log(1.0-alpha)], axis=-1)
+            q_weights = torch.logsumexp(q_weights, dim=-1, keepdim=False)
+            q_weights = q_weights - torch.logsumexp(q_weights, dim=-1, keepdim=True)  # normalized
+            particle_weights = particle_weights - q_weights  # this is unnormalized
+        else:
+            # hard resampling -> produces zero gradients
+            q_weights = particle_weights
+            particle_weights = uniform_weights
+
+        # sample particle indices according to q(s) using q_weights
+        m = torch.distributions.categorical.Categorical(logits=q_weights)
+        idx = []
+        # iterate over num_particles
+        for _ in range(num_particles):
+            sample = m.sample() #   [batch_size]
+            idx.append(sample.unsqueeze(1))
+        indices = torch.cat(idx, dim=-1)    #   [batch_size, num_particles]
+
+        # index into particles
+        helper = torch.arange(0, batch_size * num_particles, step=num_particles, dtype=torch.int64).to(self.params.device) # [batch_size]
+        indices = indices + helper.unsqueeze(1)
+
+        indices = torch.reshape(indices, (batch_size * num_particles, ))
+        # gather new particle states based on indices
+        particle_states = torch.reshape(particle_states, (batch_size * num_particles, 3))
+        new_particle_states = particle_states[indices].view(batch_size, num_particles, 3)   # [batch_size, num_particles, 3]
+        # gather new particle weights based on indices
+        particle_weights = torch.reshape(particle_weights, (batch_size * num_particles, ))
+        new_particle_weights = particle_weights[indices].view(batch_size, num_particles)    # [batch_size, num_particles]
+
+        # uniform_weights = uniform_weights.cpu().detach().numpy()
+        # uniform_weights = tf.convert_to_tensor(uniform_weights)
+        # particle_states = particle_states.cpu().detach().numpy()
+        # particle_states = tf.convert_to_tensor(particle_states)
+        # particle_weights = particle_weights.cpu().detach().numpy()
+        # particle_weights = tf.convert_to_tensor(particle_weights)
+        # q_weights = tf.stack([particle_weights + np.log(alpha), uniform_weights + np.log(1.0-alpha)], axis=-1)
+        # q_weights = tf.reduce_logsumexp(q_weights, axis=-1, keepdims=False)
+        # indices = tf.cast(tf.random.categorical(q_weights, num_particles), tf.int32)
+        #
+        # helper = tf.range(0, batch_size*num_particles, delta=num_particles, dtype=tf.int32)  # (batch, )
+        # indices = indices + tf.expand_dims(helper, axis=1)
+        # particle_states = tf.reshape(particle_states, (batch_size * num_particles, 3))
+        # print(particle_states.shape, indices.shape)
+        # particle_states = tf.gather(particle_states, indices=indices, axis=0)
+        # print(particle_states.shape)
+
+        return new_particle_states, new_particle_weights
+
 class PFCell(nn.Module):
     def __init__(self, params):
         super(PFCell, self).__init__()
@@ -683,6 +752,7 @@ class PFCell(nn.Module):
 
         self.transition_model = TransitionModel(params)
         self.trans_map_model = SpatialTransformerNet(params)
+        self.resample_model = ResampleNet(params)
         self.observation_model = ObservationModel()
         self.map_model = MapModel()
         self.likeli_net = LikelihoodNet()
@@ -696,7 +766,8 @@ class PFCell(nn.Module):
         particle_weights += lik  # unnormalized
 
         # resample
-        # TODO self.resample(...)
+        if self.params.resample:
+            particle_states, particle_weights = self.resample(particle_states, particle_weights)
 
         # construct output before motion update
         outputs = particle_states, particle_weights
@@ -736,8 +807,13 @@ class PFCell(nn.Module):
 
         return lik
 
-    def resample(self):
-        return
+    def resample(self, particle_states, particle_weights):
+
+        # [batch_size, K, 3] [batch_size, K]
+        new_particle_states, new_particle_weights = \
+            self.resample_model(particle_states, particle_weights, self.params.alpha_resample_ratio)
+
+        return new_particle_states, new_particle_weights
 
     def motion_update(self, particle_states, odometry):
 
@@ -780,7 +856,7 @@ if __name__ == '__main__':
     argparser = argparse.ArgumentParser()
     params = argparser.parse_args()
     params.num_epochs = 1
-    params.batch_size = 1
+    params.batch_size = 2
     params.num_particles = 30
     params.trajlen = 24
     params.map_pixel_in_meters = 0.02
@@ -790,6 +866,8 @@ if __name__ == '__main__':
     params.local_map_size = (28, 28)
     params.seed = 42
     params.type = 'valid'
+    params.alpha_resample_ratio = 0.5
+    params.resample = True
 
     params.device = torch.device('cpu')
     os.environ['CUDA_VISIBLE_DEVICES'] = '-1' # tensorflow
@@ -804,6 +882,7 @@ if __name__ == '__main__':
 
     transition_model = TransitionModel(params)
     observation_model = ObservationModel()
+    resample_model = ResampleNet(params)
     trans_map_model = SpatialTransformerNet(params)
     map_model = MapModel()
     likeli_net = LikelihoodNet()
@@ -821,6 +900,8 @@ if __name__ == '__main__':
         global_maps = batch_samples['global_map']
         labels = batch_samples['true_states']
         odometries = batch_samples['odometry']
+        particle_weights = torch.full((params.batch_size, params.num_particles), \
+                np.log(1.0/float(params.num_particles)))
 
         batch_size, trajlen = observations.shape[:2]
         num_particles = particle_states.shape[1]
@@ -870,9 +951,10 @@ if __name__ == '__main__':
 
             # [batch_size, num_particles] unflatten batch and particle dimensions
             lik = torch.reshape(lik, [batch_size, num_particles])
+            particle_weights += lik  # unnormalized
 
             # resample
-            #TODO
+            particle_states, particle_weights = resample_model(particle_states, particle_weights, params.alpha_resample_ratio)
 
             # motion update
 

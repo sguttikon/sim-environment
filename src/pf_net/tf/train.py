@@ -183,10 +183,12 @@ if __name__ == '__main__':
     argparser.add_argument('--train_file', type=str, default='../data/valid.tfrecords', help='path to the training .tfrecords')
     argparser.add_argument('--type', type=str, default='valid', help='type of .tfrecords')
     argparser.add_argument('--num_epochs', type=int, default=20, help='number of epochs to train')
+    argparser.add_argument('--resample', type=str2bool, nargs='?', const=True, default=False, help='use resampling during training')
+    argparser.add_argument('--alpha_resample_ratio', type=float, default=0.5, help='alpha=0: uniform sampling (ignoring weights) and alpha=1: standard hard sampling (produces zero gradients)')
     argparser.add_argument('--batch_size', type=int, default=4, help='batch size used for training')
     argparser.add_argument('--num_workers', type=int, default=0, help='workers used for data loading')
     argparser.add_argument('--num_particles', type=int, default=30, help='number of particles used for training')
-    argparser.add_argument('--transition_std', nargs='*', default=[0, 0], help='error in motion execution')
+    argparser.add_argument('--transition_std', nargs='*', default=['0.0', '0.0'], help='std for motion model, translation std (meters), rotatation std (radians)')
     argparser.add_argument('--local_map_size', nargs='*', default=(28, 28), help='shape of local map')
     argparser.add_argument('--use_cpu', type=str2bool, nargs='?', const=True, default=False, help='cpu training')
     argparser.add_argument('--seed', type=int, default=42, help='random seed')
@@ -206,7 +208,11 @@ if __name__ == '__main__':
     params.trajlen = 24
     params.map_pixel_in_meters = 0.02
     params.init_particles_distr = 'gaussian'
-    params.init_particles_std = [0.3, 0.523599]  # 30cm, 30degrees
+    params.init_particles_std = ['0.3', '0.523599']  # 30cm, 30degrees
+
+    # convert multi-input fileds to numpy arrays
+    params.init_particles_std = np.array(params.init_particles_std, np.float32)
+    params.transition_std = np.array(params.transition_std, np.float32)
 
     # set common seed value
     torch.cuda.manual_seed(params.seed)
