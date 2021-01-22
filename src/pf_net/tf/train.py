@@ -105,15 +105,19 @@ class PFNet(object):
                 b_loss_total.append(loss_total)
                 b_loss_coords.append(loss_coords)
 
-                # log per batch stats
+                # log per epoch batch stats
                 print('epoch: {0:05d}, batch: {1:05d}, b_loss_coords: {2:03.3f}, b_loss_total: {3:03.3f}'.format(epoch, batch_idx, loss_coords, loss_total))
-                self.writer.add_scalars(f'training/b_loss_total', {'loss': loss_total}, epoch)
-                self.writer.add_scalars(f'training/b_loss_coords', {'loss': loss_coords}, epoch)
+                self.writer.add_scalars('epoch-{0:03d}_train_stats'.format(epoch), {
+                    'b_total_loss': loss_total,
+                    'b_coords_loss': loss_coords
+                }, batch_idx)
 
             # log per epoch mean stats
             print('epoch: {0:05d}, mean_loss_coords: {1:03.3f}, mean_loss_total: {2:03.3f}'.format(epoch, np.mean(b_loss_coords), np.mean(b_loss_total)))
-            self.writer.add_scalar(f'training/mean_b_loss_total', np.mean(b_loss_total), epoch)
-            self.writer.add_scalar(f'training/mean_b_loss_coords', np.mean(b_loss_coords), epoch)
+            self.writer.add_scalars(f'train_stats', {
+                    'mean_total_loss': np.mean(b_loss_total),
+                    'mean_coords_loss': np.mean(b_loss_coords)
+            }, epoch)
 
             # save
             file_name = 'saved_models/' + 'pfnet_eps_{0:05d}.pth'.format(epoch)
