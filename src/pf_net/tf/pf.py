@@ -492,7 +492,7 @@ class PFCell(nn.Module):
     def __init__(self, params):
         super(PFCell, self).__init__()
         self.params = params
-
+        self.dummy_param = nn.Parameter(torch.empty(0))
         self.build_map_model()
 
     def forward(self, inputs, state):
@@ -513,17 +513,10 @@ class PFCell(nn.Module):
         odometry = odometry.to(self.params.device)
         global_maps = global_maps.to(self.params.device)
 
-        # [batch_size, K, 3], [batch_size, C, H, W]
-        local_maps = self.get_local_maps(particle_states, global_maps)
+        # observation update
+        lik = self.observation_update(global_maps, particle_states, observation)
+        particle_weights = particle_weights + lik  # unnormalized
 
-        # flatten batch and particle dimensions
-        local_maps = torch.reshape(local_maps, [batch_size * num_particles] + list(local_maps.shape[2:]))
-        map_features = self.map_features(local_maps)
-
-        # # observation update
-        # lik = self.observation_update(global_maps, particle_states, observation)
-        # particle_weights = particle_weights + lik  # unnormalized
-        #
         # # resample
         # if self.params.resample:
         #     particle_states, particle_weights = self.resample(particle_states, particle_weights)
@@ -684,8 +677,8 @@ class PFCell(nn.Module):
         return x # [batch_size, 16, 14, 14]
 
     def map_features(self, local_maps: Tensor) -> Tensor:
-
-        x = local_maps
+        device = self.dummy_param.get_device()
+        x = local_maps.to(self.device)
 
         # block1
         convs = []
@@ -710,13 +703,13 @@ class PFCell(nn.Module):
         return x # [batch_size*num_particles, 8, 14, 14]
 
     def get_local_maps(self, particle_states: Tensor, global_maps: Tensor) -> Tensor:
-
+        device = self.dummy_param.get_device()
         batch_size, num_particles = particle_states.shape[:2]
         total_samples = batch_size * num_particles
         flat_states = torch.reshape(particle_states, (total_samples, 3))
 
-        zero = torch.full((total_samples, ), 0).cuda()
-        one = torch.full((total_samples, ), 1).cuda()
+        zero = torch.full((total_samples, ), 0).to(device)
+        one = torch.full((total_samples, ), 1).to(device)
 
         input_map_shape = global_maps.shape
         # affine transformation
@@ -739,8 +732,8 @@ class PFCell(nn.Module):
 
         # 3. optional scale down the map
         window_scaler = 8
-        scale_x = torch.full((total_samples, ), float(self.params.local_map_size[0] * window_scaler) * width_inverse).cuda()
-        scale_y = torch.full((total_samples, ), float(self.params.local_map_size[1] * window_scaler) * height_inverse).cuda()
+        scale_x = torch.full((total_samples, ), float(self.params.local_map_size[0] * window_scaler) * width_inverse).to(device)
+        scale_y = torch.full((total_samples, ), float(self.params.local_map_size[1] * window_scaler) * height_inverse).to(device)
         scalem = torch.stack([scale_x, zero, zero, zero, scale_y, zero, zero, zero, one], axis=1)
         scalem = torch.reshape(scalem, (total_samples, 3, 3))
 
