@@ -578,7 +578,7 @@ class LikelihoodNet(nn.Module):
         #         1, activation=None, use_bias=True)(x)
         # print(lik.shape)
 
-        return lik
+        return lik # [batch_size*num_particles, 1]
 
 # reference: https://discuss.pytorch.org/t/locally-connected-layers/26979/2
 from torch.nn.modules.utils import _pair
@@ -787,20 +787,35 @@ class PFCell(nn.Module):
         # [batch_size, K, 3], [batch_size, C, H, W]
         local_maps = self.trans_map_model(particle_states, global_maps)
 
+        # sanity check
+        assert list(local_maps.shape) == [batch_size, num_particles, 1, 28, 28]
+
         # flatten batch and particle dimensions
         local_maps = torch.reshape(local_maps, [batch_size * num_particles] + list(local_maps.shape[2:]))
         map_features = self.map_model(local_maps)
 
+        # sanity check
+        assert list(map_features.shape) == [batch_size*num_particles, 8, 14, 14]
+
         # [batch_size, C, H, W]
         obs_features = self.observation_model(observation)
+
+        # sanity check
+        assert list(obs_features.shape) == [batch_size, 16, 14, 14]
 
         # tile observation features and flatten batch and particle dimensions
         obs_features = obs_features.unsqueeze(1).repeat(1, num_particles, 1, 1, 1)
         obs_features = torch.reshape(obs_features, [batch_size * num_particles] + list(obs_features.shape[2:]))
 
+        # sanity check
+        assert list(obs_features.shape) == [batch_size * num_particles, 16, 14, 14]
+
         # merge features and process further
         joint_features = torch.cat([map_features, obs_features], axis=1)
         lik = self.likeli_net(joint_features)
+
+        # sanity check
+        assert list(lik.shape) == [batch_size * num_particles, 1]
 
         # [batch_size, num_particles] unflatten batch and particle dimensions
         lik = torch.reshape(lik, [batch_size, num_particles])
@@ -812,6 +827,10 @@ class PFCell(nn.Module):
         # [batch_size, K, 3] [batch_size, K]
         new_particle_states, new_particle_weights = \
             self.resample_model(particle_states, particle_weights, self.params.alpha_resample_ratio)
+
+        # sanity check
+        assert list(new_particle_states.shape) == [batch_size, num_particles, 3]
+        assert list(new_particle_weights.shape) == [batch_size, num_particles]
 
         return new_particle_states, new_particle_weights
 

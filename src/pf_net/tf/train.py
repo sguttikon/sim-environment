@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data import DataLoader
 from torchvision import transforms
 from pathlib import Path
 import numpy as np
@@ -27,12 +28,13 @@ class PFNet(object):
         if params.multiple_gpu:
             for i in params.device_ids:
                 torch.cuda.set_device(i)
-            self.pf_cell = torch.nn.DataParallel(self.pf_cell, device_ids=params.device_ids)
+            self.pf_cell = torch.nn.DataParallel(self.pf_cell)
 
         model_params =  list(self.pf_cell.parameters())
         self.optimizer = torch.optim.Adam(model_params, lr=2e-4, weight_decay=0.01)
 
         self.writer = SummaryWriter()
+        print('PFNet initialized')
 
     def run_episode(self, episode_batch):
         trajlen = self.params.trajlen
@@ -45,6 +47,12 @@ class PFNet(object):
 
         init_particle_states = episode_batch['init_particles'].to(params.device)
         init_particle_weights = torch.full((batch_size, num_particles), np.log(1.0/float(num_particles))).to(params.device)
+
+        # sanity check
+        assert list(init_particle_states.shape) == [batch_size, num_particles, 3]
+        assert list(init_particle_weights.shape) == [batch_size, num_particles]
+        assert list(observations.shape) == [batch_size, trajlen, 3, 56, 56]
+        assert list(odometries.shape) == [batch_size, trajlen, 3]
 
         # start with episode trajectory state with init particles and weights
         state = init_particle_states, init_particle_weights
@@ -71,9 +79,11 @@ class PFNet(object):
         return outputs
 
     def run_training(self):
+        trajlen = self.params.trajlen
         batch_size = self.params.batch_size
         num_particles = self.params.num_particles
 
+        print('training started')
         # iterate over num_epochs
         for epoch in range(self.params.num_epochs):
             b_loss_total = []
@@ -87,6 +97,9 @@ class PFNet(object):
                 # skip if batch_size doesn't match
                 if batch_size != labels.shape[0]:
                     break
+
+                # sanity check
+                assert list(labels.shape) == [batch_size, trajlen, 3]
 
                 outputs = self.run_episode(episode_batch)
 
