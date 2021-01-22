@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data import DataLoader
 from torchvision import transforms
 from pathlib import Path
 import numpy as np
@@ -17,14 +18,22 @@ class PFNet(object):
     def __init__(self, params):
         self.params = params
 
+        # data loader
         composed = transforms.Compose([
                     pf.ToTensor(),
         ])
         train_dataset = pf.House3DTrajDataset(params, params.train_file, transform=composed)
-        self.train_data_loader = pf.DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
+        self.train_data_loader = DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
 
-        self.pf_cell = pf.PFCell(params).to(params.device)
+        # define model
+        self.pf_cell = pf.PFCell(params)
 
+        if params.multiple_gpu:
+            self.pf_cell = torch.nn.DataParallel(self.pf_cell, device_ids=range(params.device_count), output_device=self.params.device)
+            self.params.batch_size //= self.params.device_count # data gets distributed amoung devices
+        self.pf_cell.to(params.device)
+
+        # define optimizer
         model_params =  list(self.pf_cell.parameters())
         self.optimizer = torch.optim.Adam(model_params, lr=2e-4, weight_decay=0.01)
 
@@ -32,15 +41,13 @@ class PFNet(object):
 
     def run_episode(self, episode_batch):
         trajlen = self.params.trajlen
-        batch_size = self.params.batch_size
-        num_particles = self.params.num_particles
 
-        odometries = episode_batch['odometry'].to(params.device)
-        global_maps = episode_batch['global_map'].to(params.device)
-        observations = episode_batch['observation'].to(params.device)
-
-        init_particle_states = episode_batch['init_particles'].to(params.device)
-        init_particle_weights = torch.full((batch_size, num_particles), np.log(1.0/float(num_particles))).to(params.device)
+        odometries = episode_batch['odometry']
+        global_maps = episode_batch['global_map']
+        observations = episode_batch['observation']
+        init_particle_states = episode_batch['init_particles']
+        batch_size, num_particles = init_particle_states.shape[:2]
+        init_particle_weights = torch.full((batch_size, num_particles), np.log(1.0/float(num_particles)))
 
         # start with episode trajectory state with init particles and weights
         state = init_particle_states, init_particle_weights
@@ -78,7 +85,7 @@ class PFNet(object):
             # iterate over num_batches
             for batch_idx, batch_samples in enumerate(self.train_data_loader):
                 episode_batch = batch_samples
-                labels = episode_batch['true_states'].to(params.device)
+                labels = episode_batch['true_states']
 
                 # skip if batch_size doesn't match
                 if batch_size != labels.shape[0]:
@@ -195,6 +202,7 @@ if __name__ == '__main__':
     argparser.add_argument('--transition_std', nargs='*', default=['0.0', '0.0'], help='std for motion model, translation std (meters), rotatation std (radians)')
     argparser.add_argument('--local_map_size', nargs='*', default=(28, 28), help='shape of local map')
     argparser.add_argument('--use_cpu', type=str2bool, nargs='?', const=True, default=False, help='cpu training')
+    argparser.add_argument('--multiple_gpu', type=str2bool, nargs='?', const=True, default=False, help='use multiple gpu for training')
     argparser.add_argument('--seed', type=int, default=42, help='random seed')
 
     params = argparser.parse_args()
@@ -203,11 +211,16 @@ if __name__ == '__main__':
     print(params)
     print("#########################")
 
+    params.device_count = 1
     if not params.use_cpu and torch.cuda.is_available():
+        os.environ['CUDA_VISIBLE_DEVICES'] = ','.join([str(elem) for elem in range(torch.cuda.device_count())])
+        print('GPU detected: ', os.environ['CUDA_VISIBLE_DEVICES'])
+        params.device_count = torch.cuda.device_count()
         params.device = torch.device('cuda')
     else:
+        params.use_cpu = True
         params.device = torch.device('cpu')
-        os.environ['CUDA_VISIBLE_DEVICES'] = '-1' # tensorflow
+        print('No GPU. switching to CPU')
 
     params.trajlen = 24
     params.map_pixel_in_meters = 0.02

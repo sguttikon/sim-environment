@@ -326,8 +326,9 @@ class TransitionModel(nn.Module):
 
 class ObservationModel(nn.Module):
 
-    def __init__(self):
+    def __init__(self, params):
         super(ObservationModel, self).__init__()
+        self.params = params
 
         block1_layers = [
             nn.Conv2d(3, 128, kernel_size=3, stride=1, padding=1, dilation=1, bias=True),
@@ -402,8 +403,9 @@ class ObservationModel(nn.Module):
 
 class MapModel(nn.Module):
 
-    def __init__(self):
+    def __init__(self, params):
         super(MapModel, self).__init__()
+        self.params = params
 
         block1_layers = [
             nn.Conv2d(1, 24, kernel_size=3, stride=1, padding=1, dilation=1, bias=True),
@@ -495,8 +497,9 @@ class MapModel(nn.Module):
 
 class LikelihoodNet(nn.Module):
 
-    def __init__(self):
+    def __init__(self, params):
         super(LikelihoodNet, self).__init__()
+        self.params = params
 
         output_size = (12, 12)
 
@@ -753,9 +756,12 @@ class PFCell(nn.Module):
         self.transition_model = TransitionModel(params)
         self.trans_map_model = SpatialTransformerNet(params)
         self.resample_model = ResampleNet(params)
-        self.observation_model = ObservationModel()
-        self.map_model = MapModel()
-        self.likeli_net = LikelihoodNet()
+        self.observation_model = ObservationModel(params)
+        self.map_model = MapModel(params)
+        self.likeli_net = LikelihoodNet(params)
+
+        # to determine device dynamically
+        self.dummy_param = nn.Parameter(torch.empty(0))
 
     def forward(self, inputs, state):
         particle_states, particle_weights = state
