@@ -25,7 +25,9 @@ class PFNet(object):
 
         self.pf_cell = pf.PFCell(params).to(params.device)
         if params.multiple_gpu:
-            self.pf_cell = torch.nn.DataParallel(self.pf_cell, device_ids=list(range(torch.cuda.device_count())))
+            self.pf_cell = torch.nn.parallel.DistributedDataParallel(self.pf_cell, device_ids=list(range(torch.cuda.device_count())))
+            for i in list(range(torch.cuda.device_count())):
+                torch.cuda.set_device(i)
 
         model_params =  list(self.pf_cell.parameters())
         self.optimizer = torch.optim.Adam(model_params, lr=2e-4, weight_decay=0.01)
