@@ -402,8 +402,9 @@ class ObservationModel(nn.Module):
 
 class MapModel(nn.Module):
 
-    def __init__(self):
+    def __init__(self, params):
         super(MapModel, self).__init__()
+        self.params = params
 
         block1_layers = [
             nn.Conv2d(1, 24, kernel_size=3, stride=1, padding=1, dilation=1, bias=True),
@@ -662,14 +663,14 @@ class SpatialTransformerNet(nn.Module):
         # transform_m = torch.matmul(transform_m, transm2)
 
         # reshape to the format expected by the spatial transform network
-        transform_m = torch.reshape(transform_m[:, :2], (batch_size, num_particles, 2, 3))
+        transform_m = torch.reshape(transform_m[:, :2], (batch_size * num_particles, 2, 3))
+        grid_size = torch.Size((batch_size * num_particles, input_map_shape[1], self.params.local_map_size[0], self.params.local_map_size[1]))
+        grid = F.affine_grid(transform_m, grid_size, align_corners=False).float()
 
         output_list = []
         # iterate over num_particles
         for i in range(num_particles):
-            grid_size = torch.Size((batch_size, input_map_shape[1], self.params.local_map_size[0], self.params.local_map_size[1]))
-            grid = F.affine_grid(transform_m[:, i], grid_size, align_corners=False).float()
-            local_map = F.grid_sample(global_maps, grid, align_corners=False)
+            local_map = F.grid_sample(global_maps, grid[i*batch_size: (i+1)*batch_size, :, :, :], align_corners=False)
             output_list.append(local_map)
         local_maps = torch.stack(output_list, axis=1)
 
@@ -750,12 +751,16 @@ class PFCell(nn.Module):
 
         self.params = params
 
-        self.transition_model = TransitionModel(params)
         self.trans_map_model = SpatialTransformerNet(params)
-        self.resample_model = ResampleNet(params)
-        self.observation_model = ObservationModel()
-        self.map_model = MapModel()
-        self.likeli_net = LikelihoodNet()
+        self.map_model = MapModel(params)
+        # self.transition_model = TransitionModel(params)
+        # self.resample_model = ResampleNet(params)
+        # self.observation_model = ObservationModel()
+        # self.likeli_net = LikelihoodNet()
+
+        if params.multiple_gpu:
+            self.trans_map_model = torch.nn.DataParallel(self.map_model)
+            self.map_model = torch.nn.DataParallel(self.map_model)
 
     def forward(self, inputs, state):
         particle_states, particle_weights = state
@@ -775,22 +780,28 @@ class PFCell(nn.Module):
         odometry = odometry.to(self.params.device)
         global_maps = global_maps.to(self.params.device)
 
-        # observation update
-        lik = self.observation_update(global_maps, particle_states, observation)
-        particle_weights = particle_weights + lik  # unnormalized
+        local_maps = self.trans_map_model(particle_states, global_maps)
 
-        # resample
-        if self.params.resample:
-            particle_states, particle_weights = self.resample(particle_states, particle_weights)
+        # flatten batch and particle dimensions
+        local_maps = torch.reshape(local_maps, [batch_size * num_particles] + list(local_maps.shape[2:]))
+        map_features = self.map_model(local_maps)
 
+        # # observation update
+        # lik = self.observation_update(global_maps, particle_states, observation)
+        # particle_weights = particle_weights + lik  # unnormalized
+        #
+        # # resample
+        # if self.params.resample:
+        #     particle_states, particle_weights = self.resample(particle_states, particle_weights)
+        
         # construct output before motion update
         outputs = particle_states, particle_weights
 
-        # motion update
-        particle_states = self.motion_update(particle_states, odometry)
-
-        # construct new state
-        state = particle_states, particle_weights
+        # # motion update
+        # particle_states = self.motion_update(particle_states, odometry)
+        #
+        # # construct new state
+        # state = particle_states, particle_weights
 
         return outputs, state
 

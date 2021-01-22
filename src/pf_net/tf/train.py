@@ -95,16 +95,16 @@ class PFNet(object):
 
                 # [batch_size, trajlen, [num_particles], ..]
                 losses = self.loss_fn(outputs[0], outputs[1], labels)
-                losses['loss_total'].backward()
-
-                # visualize gradient flow
-                # pf.plot_grad_flow(self.pf_cell.named_parameters())
-
-                # update parameters based on gradients
-                self.optimizer.step()
-
-                # cleat gradients
-                self.optimizer.zero_grad()
+                # losses['loss_total'].backward()
+                #
+                # # visualize gradient flow
+                # # pf.plot_grad_flow(self.pf_cell.named_parameters())
+                #
+                # # update parameters based on gradients
+                # self.optimizer.step()
+                #
+                # # cleat gradients
+                # self.optimizer.zero_grad()
 
                 loss_total = losses['loss_total'].item()
                 loss_coords = losses['loss_coords'].item()
