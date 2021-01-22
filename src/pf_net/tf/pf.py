@@ -197,13 +197,11 @@ class House3DTrajDataset(Dataset):
 
         rgb = self.raw_images_to_array(list(features['rgb'].bytes_list.value))
 
-        init_particles = self.random_particles(true_states[0], self.params.init_particles_distr, \
-                            self.params.init_particles_cov, self.params.num_particles, \
-                            seed=self.get_sample_seed(self.params.seed, idx))
+        init_particles = self.random_particles(true_states[0], seed=self.get_sample_seed(self.params.seed, idx))
 
         plt_ax.imshow(map_wall.transpose(), cmap='Greys',  interpolation='nearest')
 
-        #particles_plt = plt.scatter(init_particles[:, 0], init_particles[:, 1], s=10, c='blue', alpha=.5)
+        particles_plt = plt.scatter(init_particles[:, 0], init_particles[:, 1], s=10, c='blue', alpha=.5)
 
         for i in range(100):
             old_pose = true_states[i]
@@ -241,7 +239,7 @@ def sample_motion_odometry(old_pose, odometry):
 
     x2 = x1 + (cos * odom_x - sin * odom_y)
     y2 = y1 + (sin * odom_x + cos * odom_y)
-    th2 = wrap_angle(th1 + odom_th)
+    th2 = normalize(th1 + odom_th)
 
     new_pose = np.array([x2, y2, th2])
     return new_pose
@@ -648,8 +646,8 @@ class SpatialTransformerNet(nn.Module):
 
         # 3. optional scale down the map
         window_scaler = 8
-        scale_x = torch.full((total_samples, ), float(self.params.local_map_size[0] * window_scaler) * width_inverse)
-        scale_y = torch.full((total_samples, ), float(self.params.local_map_size[1] * window_scaler) * height_inverse)
+        scale_x = torch.full((total_samples, ), float(self.params.local_map_size[0] * window_scaler) * width_inverse).to(self.params.device)
+        scale_y = torch.full((total_samples, ), float(self.params.local_map_size[1] * window_scaler) * height_inverse).to(self.params.device)
         scalem = torch.stack([scale_x, zero, zero, zero, scale_y, zero, zero, zero, one], axis=1)
         scalem = torch.reshape(scalem, (total_samples, 3, 3))
 
