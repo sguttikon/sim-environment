@@ -24,6 +24,8 @@ class PFNet(object):
         self.train_data_loader = pf.DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
 
         self.pf_cell = pf.PFCell(params).to(params.device)
+        if params.multiple_gpu:
+            self.pf_cell = torch.nn.DataParallel(self.pf_cell, device_ids=list(range(torch.cuda.device_count())))
 
         model_params =  list(self.pf_cell.parameters())
         self.optimizer = torch.optim.Adam(model_params, lr=2e-4, weight_decay=0.01)
@@ -195,6 +197,7 @@ if __name__ == '__main__':
     argparser.add_argument('--transition_std', nargs='*', default=['0.0', '0.0'], help='std for motion model, translation std (meters), rotatation std (radians)')
     argparser.add_argument('--local_map_size', nargs='*', default=(28, 28), help='shape of local map')
     argparser.add_argument('--use_cpu', type=str2bool, nargs='?', const=True, default=False, help='cpu training')
+    argparser.add_argument('--multiple_gpu', type=str2bool, nargs='?', const=True, default=False, help='use multiple gpu for training')
     argparser.add_argument('--seed', type=int, default=42, help='random seed')
 
     params = argparser.parse_args()
