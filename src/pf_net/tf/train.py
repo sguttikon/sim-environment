@@ -60,21 +60,22 @@ class PFNet(object):
         batch_size = self.params.batch_size
         num_particles = self.params.num_particles
 
-        # define model
-        model = pf.PFCell(params)
-        if params.multiple_gpu:
-            model = torch.nn.DataParallel(model)
-        model.to(params.device)
-
-        # define optimizer
-        self.optimizer = torch.optim.Adam(model.parameters(), lr=2e-4, weight_decay=0.01)
-
         # data loader
         composed = transforms.Compose([
                     pf.ToTensor(),
         ])
         train_dataset = pf.House3DTrajDataset(params, params.train_file, transform=composed)
         train_loader = DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers, pin_memory=True)
+        
+        # define model
+        model = pf.PFCell(params)
+        if params.multiple_gpu:
+            model = torch.nn.DataParallel(model)
+            params.batch_size *= params.device_count
+        model.to(params.device)
+
+        # define optimizer
+        self.optimizer = torch.optim.Adam(model.parameters(), lr=2e-4, weight_decay=0.01)
 
         print('data loaded initialized')
         # iterate over num_epochs
@@ -205,11 +206,12 @@ if __name__ == '__main__':
     print(params)
     print("#########################")
 
+    params.device_count = 1
     if not params.use_cpu and torch.cuda.is_available():
-        for i in range(torch.cuda.device_count()):
-            os.environ['CUDA_VISIBLE_DEVICES'] = str(i)
+        os.environ['CUDA_VISIBLE_DEVICES'] = ','.join([str(elem) for elem in range(torch.cuda.device_count())])
         params.device = torch.device('cuda:0')
-        print('GPU detected')
+        print('GPU detected: ', os.environ['CUDA_VISIBLE_DEVICES'])
+        params.device_count = torch.cuda.device_count()
     else:
         params.device = torch.device('cpu')
         print('No GPU. switching to CPU')
