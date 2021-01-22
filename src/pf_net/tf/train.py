@@ -26,7 +26,8 @@ class PFNet(object):
         global_maps = episode_batch['global_map']
         observations = episode_batch['observation']
         init_particle_states = episode_batch['init_particles']
-        init_particle_weights = episode_batch['init_particle_weights']
+        batch_size, num_particles = init_particle_states.shape[:2]
+        init_particle_weights = torch.full((batch_size, num_particles), np.log(1.0/num_particles))
 
         # start with episode trajectory state with init particles and weights
         state = init_particle_states, init_particle_weights
@@ -51,19 +52,6 @@ class PFNet(object):
         outputs = t_particle_states, t_particle_weights
 
         return outputs
-
-    def preprocess_data(self, batch_samples):
-        episode_batch = {}
-
-        batch_size, num_particles = batch_samples['init_particles'].shape[:2]
-        episode_batch['init_particle_weights'] = torch.full((batch_size, num_particles), np.log(1.0/num_particles)).to(self.params.device)
-        episode_batch['init_particles'] = batch_samples['init_particles'].to(self.params.device)
-        episode_batch['true_states'] = batch_samples['true_states'].to(self.params.device)
-        episode_batch['observation'] = batch_samples['observation'].to(self.params.device)
-        episode_batch['global_map'] = batch_samples['global_map'].to(self.params.device)
-        episode_batch['odometry'] = batch_samples['odometry'].to(self.params.device)
-
-        return episode_batch
 
     def run_training(self):
         trajlen = self.params.trajlen
@@ -97,10 +85,10 @@ class PFNet(object):
             model.train()
             # iterate over num_batches
             for batch_idx, batch_samples in enumerate(train_loader):
-                episode_batch = self.preprocess_data(batch_samples)
+                episode_batch = batch_samples
 
                 # skip if batch_size doesn't match
-                labels = episode_batch['true_states']
+                labels = episode_batch['true_states'].to(self.params.device)
                 if batch_size != labels.shape[0]:
                     break
 
@@ -185,7 +173,6 @@ class PFNet(object):
     def load(self, model, file_name):
         checkpoint = torch.load(file_name)
         model.load_state_dict(checkpoint['pf_cell'])
-        return model
 
     def test(self):
         file_name = 'saved_models/pfnet_eps_0.pth'

@@ -666,14 +666,14 @@ class SpatialTransformerNet(nn.Module):
         # transform_m = torch.matmul(transform_m, transm2)
 
         # reshape to the format expected by the spatial transform network
-        transform_m = torch.reshape(transform_m[:, :2], (batch_size, num_particles, 2, 3))
+        transform_m = torch.reshape(transform_m[:, :2], (batch_size * num_particles, 2, 3))
+        grid_size = torch.Size((batch_size * num_particles, input_map_shape[1], self.params.local_map_size[0], self.params.local_map_size[1]))
+        grid = F.affine_grid(transform_m, grid_size, align_corners=False).float()
 
         output_list = []
         # iterate over num_particles
         for i in range(num_particles):
-            grid_size = torch.Size((batch_size, input_map_shape[1], self.params.local_map_size[0], self.params.local_map_size[1]))
-            grid = F.affine_grid(transform_m[:, i], grid_size, align_corners=False).float()
-            local_map = F.grid_sample(global_maps, grid, align_corners=False)
+            local_map = F.grid_sample(global_maps, grid[i*batch_size: (i+1)*batch_size, :, :, :], align_corners=False)
             output_list.append(local_map)
         local_maps = torch.stack(output_list, axis=1)
 
@@ -776,6 +776,12 @@ class PFCell(nn.Module):
         assert list(global_maps.shape) == [batch_size, 1, 3000, 3000]
         assert list(observation.shape) == [batch_size, 3, 56, 56]
         assert list(odometry.shape) == [batch_size, 3]
+
+        particle_states = particle_states.to(self.params.device)
+        particle_weights = particle_weights.to(self.params.device)
+        observation = observation.to(self.params.device)
+        odometry = odometry.to(self.params.device)
+        global_maps = global_maps.to(self.params.device)
 
         # observation update
         lik = self.observation_update(global_maps, particle_states, observation)
