@@ -433,8 +433,8 @@ class MapModel(nn.Module):
         ]
         self.block4 = nn.ModuleList(block4_layers)
 
-    def forward(self, local_maps: Tensor) -> Tensor:
-        x = local_maps
+    def forward(self, particle_states: Tensor, global_maps: Tensor) -> Tensor:
+        x = get_local_maps(particle_states, global_maps)
 
         # block1
         convs = []
@@ -493,6 +493,65 @@ class MapModel(nn.Module):
         # x = tf.concat(convs, axis=-1)
         # print(x.shape)
         return x # [batch_size*num_particles, 8, 14, 14]
+
+    def get_local_maps(self, particle_states: Tensor, global_maps: Tensor) -> Tensor:
+
+        batch_size, num_particles = particle_states.shape[:2]
+        total_samples = batch_size * num_particles
+        flat_states = torch.reshape(particle_states, (total_samples, 3))
+
+        zero = torch.full((total_samples, ), 0).to(self.params.device)
+        one = torch.full((total_samples, ), 1).to(self.params.device)
+
+        input_map_shape = global_maps.shape
+        # affine transformation
+        height_inverse = 1.0 / input_map_shape[2]
+        width_inverse = 1.0 / input_map_shape[3]
+
+        # 1. translate the global map s.t. the center is at the particle state
+        translate_x = ((flat_states[:, 0] * width_inverse * 2.0) - 1.0).to(self.params.device)
+        translate_y = ((flat_states[:, 1] * height_inverse * 2.0) - 1.0).to(self.params.device)
+        transm1 = torch.stack([one, zero, translate_x, zero, one, translate_y, zero, zero, one], axis=1)
+        transm1 = torch.reshape(transm1, (total_samples, 3, 3))
+
+        # 2. rotate the global map s.t. the oriantation matches the particle state
+        # normalize orientations
+        theta = normalize(flat_states[:, 2], isTensor=True)
+        costheta = torch.cos(theta).to(self.params.device)
+        sintheta = torch.sin(theta).to(self.params.device)
+        rotm = torch.stack([costheta, sintheta, zero, -sintheta, costheta, zero, zero, zero, one], axis=1)
+        rotm = torch.reshape(rotm, (total_samples, 3, 3))
+
+        # 3. optional scale down the map
+        window_scaler = 8
+        scale_x = torch.full((total_samples, ), float(self.params.local_map_size[0] * window_scaler) * width_inverse).to(self.params.device)
+        scale_y = torch.full((total_samples, ), float(self.params.local_map_size[1] * window_scaler) * height_inverse).to(self.params.device)
+        scalem = torch.stack([scale_x, zero, zero, zero, scale_y, zero, zero, zero, one], axis=1)
+        scalem = torch.reshape(scalem, (total_samples, 3, 3))
+
+        # # 4, optional translate the local map s.t. the particle defines the bottom mid-point instead of the center
+        # translate_y2 = torch.full((total_samples, ), -1.0)
+        # transm2 = torch.stack([one, zero, zero, zero, one, translate_y2, zero, zero, one], axis=1)
+        # transm2 = torch.reshape(transm2, (total_samples, 3, 3))
+
+        # chain the transormation matrices
+        transform_m = torch.matmul(transm1, rotm)   # translate and rotation
+        transform_m = torch.matmul(transform_m, scalem) # scale
+        # transform_m = torch.matmul(transform_m, transm2)
+
+        # reshape to the format expected by the spatial transform network
+        transform_m = torch.reshape(transform_m[:, :2], (batch_size * num_particles, 2, 3))
+        grid_size = torch.Size((batch_size * num_particles, input_map_shape[1], self.params.local_map_size[0], self.params.local_map_size[1]))
+        grid = F.affine_grid(transform_m, grid_size, align_corners=False).float()
+
+        output_list = []
+        # iterate over num_particles
+        for i in range(num_particles):
+            local_map = F.grid_sample(global_maps, grid[i*batch_size: (i+1)*batch_size, :, :, :], align_corners=False)
+            output_list.append(local_map)
+        local_maps = torch.stack(output_list, axis=1)
+
+        return local_maps # [batch_size, num_particles, 1, 28, 28]
 
 class LikelihoodNet(nn.Module):
 
@@ -793,7 +852,7 @@ class PFCell(nn.Module):
         # # resample
         # if self.params.resample:
         #     particle_states, particle_weights = self.resample(particle_states, particle_weights)
-        
+
         # construct output before motion update
         outputs = particle_states, particle_weights
 
