@@ -769,6 +769,12 @@ class PFCell(nn.Module):
         assert list(observation.shape) == [batch_size, 3, 56, 56]
         assert list(odometry.shape) == [batch_size, 3]
 
+        particle_states = particle_states.to(self.params.device)
+        particle_weights = particle_weights.to(self.params.device)
+        observation = observation.to(self.params.device)
+        odometry = odometry.to(self.params.device)
+        global_maps = global_maps.to(self.params.device)
+
         # observation update
         lik = self.observation_update(global_maps, particle_states, observation)
         particle_weights = particle_weights + lik  # unnormalized
