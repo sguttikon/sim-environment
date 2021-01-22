@@ -299,7 +299,7 @@ class TransitionModel(nn.Module):
         self.params = params
 
     def forward(self, particle_states: Tensor, odometry: Tensor) -> Tensor:
-
+        device = particle_states.get_device()
         translation_std = self.params.transition_std[0] / self.params.map_pixel_in_meters  # in pixels
         rotation_std = self.params.transition_std[1]  # in radians
 
@@ -308,7 +308,7 @@ class TransitionModel(nn.Module):
         odometry = odometry.unsqueeze(1)
         odom_x, odom_y, odom_th = torch.unbind(odometry, dim=-1)
 
-        noise_th = torch.normal(mean=0.0, std=1.0, size=part_th.shape).to(self.params.device) * rotation_std
+        noise_th = torch.normal(mean=0.0, std=1.0, size=part_th.shape).to(device) * rotation_std
 
         # add orientation noise before translation
         part_th = part_th + noise_th
@@ -319,8 +319,8 @@ class TransitionModel(nn.Module):
         delta_y = sin_th * odom_x + cos_th * odom_y
         delta_th = odom_th
 
-        noise_x = torch.normal(mean=0.0, std=1.0, size=delta_x.shape).to(self.params.device) * translation_std
-        noise_y = torch.normal(mean=0.0, std=1.0, size=delta_y.shape).to(self.params.device) * translation_std
+        noise_x = torch.normal(mean=0.0, std=1.0, size=delta_x.shape).to(device) * translation_std
+        noise_y = torch.normal(mean=0.0, std=1.0, size=delta_y.shape).to(device) * translation_std
 
         return torch.stack([part_x + delta_x + noise_x, part_y + delta_y + noise_y, part_th + delta_th], axis=-1)
 
@@ -620,13 +620,14 @@ class SpatialTransformerNet(nn.Module):
         self.params = params
 
     def forward(self, particle_states: Tensor, global_maps: Tensor) -> Tensor:
+        device = particle_states.get_device()
 
         batch_size, num_particles = particle_states.shape[:2]
         total_samples = batch_size * num_particles
         flat_states = torch.reshape(particle_states, (total_samples, 3))
 
-        zero = torch.full((total_samples, ), 0).to(self.params.device)
-        one = torch.full((total_samples, ), 1).to(self.params.device)
+        zero = torch.full((total_samples, ), 0).to(device)
+        one = torch.full((total_samples, ), 1).to(device)
 
         input_map_shape = global_maps.shape
         # affine transformation
@@ -649,8 +650,8 @@ class SpatialTransformerNet(nn.Module):
 
         # 3. optional scale down the map
         window_scaler = 8
-        scale_x = torch.full((total_samples, ), float(self.params.local_map_size[0] * window_scaler) * width_inverse).to(self.params.device)
-        scale_y = torch.full((total_samples, ), float(self.params.local_map_size[1] * window_scaler) * height_inverse).to(self.params.device)
+        scale_x = torch.full((total_samples, ), float(self.params.local_map_size[0] * window_scaler) * width_inverse).to(device)
+        scale_y = torch.full((total_samples, ), float(self.params.local_map_size[1] * window_scaler) * height_inverse).to(device)
         scalem = torch.stack([scale_x, zero, zero, zero, scale_y, zero, zero, zero, one], axis=1)
         scalem = torch.reshape(scalem, (total_samples, 3, 3))
 
@@ -688,12 +689,13 @@ class ResampleNet(nn.Module):
 
         assert 0.0 < alpha <= 1.0
         batch_size, num_particles = particle_states.shape[:2]
+        device = particle_states.get_device()
 
         # normalize
         particle_weights = particle_weights - torch.logsumexp(particle_weights, dim=-1, keepdim=True)
 
         # construct uniform weights
-        uniform_weights = torch.full((batch_size, num_particles), np.log(1.0/float(num_particles))).to(self.params.device)
+        uniform_weights = torch.full((batch_size, num_particles), np.log(1.0/float(num_particles))).to(device)
 
         # build sampling distribution q(s) and update particle weights
         if alpha < 1.0:
@@ -717,7 +719,7 @@ class ResampleNet(nn.Module):
         indices = torch.cat(idx, dim=-1)    #   [batch_size, num_particles]
 
         # index into particles
-        helper = torch.arange(0, batch_size * num_particles, step=num_particles, dtype=torch.int64).to(self.params.device) # [batch_size]
+        helper = torch.arange(0, batch_size * num_particles, step=num_particles, dtype=torch.int64).to(device) # [batch_size]
         indices = indices + helper.unsqueeze(1)
 
         indices = torch.reshape(indices, (batch_size * num_particles, ))
