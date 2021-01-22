@@ -17,7 +17,6 @@ Path("saved_models").mkdir(parents=True, exist_ok=True)
 class PFNet(object):
     def __init__(self, params):
         self.params = params
-
         self.writer = SummaryWriter()
 
     def run_episode(self, model, episode_batch):
@@ -27,8 +26,7 @@ class PFNet(object):
         global_maps = episode_batch['global_map']
         observations = episode_batch['observation']
         init_particle_states = episode_batch['init_particles']
-        batch_size, num_particles = init_particle_states.shape[:2]
-        init_particle_weights = torch.full((batch_size, num_particles), np.log(1.0/float(num_particles)))
+        init_particle_weights = episode_batch['init_particle_weights']
 
         # start with episode trajectory state with init particles and weights
         state = init_particle_states, init_particle_weights
@@ -53,6 +51,19 @@ class PFNet(object):
         outputs = t_particle_states, t_particle_weights
 
         return outputs
+
+    def preprocess_data(self, batch_samples):
+        episode_batch = {}
+
+        batch_size, num_particles = batch_samples['init_particles'].shape[:2]
+        episode_batch['init_particle_weights'] = torch.full((batch_size, num_particles), np.log(1.0/num_particles)).to(self.params.device)
+        episode_batch['init_particles'] = batch_samples['init_particles'].to(self.params.device)
+        episode_batch['true_states'] = batch_samples['true_states'].to(self.params.device)
+        episode_batch['observation'] = batch_samples['observation'].to(self.params.device)
+        episode_batch['global_map'] = batch_samples['global_map'].to(self.params.device)
+        episode_batch['odometry'] = batch_samples['odometry'].to(self.params.device)
+
+        return episode_batch
 
     def run_training(self):
         trajlen = self.params.trajlen
@@ -86,10 +97,10 @@ class PFNet(object):
             model.train()
             # iterate over num_batches
             for batch_idx, batch_samples in enumerate(train_loader):
-                episode_batch = batch_samples
-                labels = episode_batch['true_states']
+                episode_batch = self.preprocess_data(batch_samples)
 
                 # skip if batch_size doesn't match
+                labels = episode_batch['true_states']
                 if batch_size != labels.shape[0]:
                     break
 
@@ -123,7 +134,7 @@ class PFNet(object):
 
             # log per epoch mean stats
             print('epoch: {0:05d}, mean_loss_coords: {1:03.3f}, mean_loss_total: {2:03.3f}'.format(epoch, np.mean(b_loss_coords), np.mean(b_loss_total)))
-            self.writer.add_scalars(f'train_stats', {
+            self.writer.add_scalars('train_stats', {
                     'mean_total_loss': np.mean(b_loss_total),
                     'mean_coords_loss': np.mean(b_loss_coords)
             }, epoch)
@@ -211,9 +222,9 @@ if __name__ == '__main__':
     params.device_count = 1
     if not params.use_cpu and torch.cuda.is_available():
         os.environ['CUDA_VISIBLE_DEVICES'] = ','.join([str(elem) for elem in range(torch.cuda.device_count())])
+        params.device = torch.device('cuda:0')
         print('GPU detected: ', os.environ['CUDA_VISIBLE_DEVICES'])
         params.device_count = torch.cuda.device_count()
-        params.device = torch.device('cuda')
     else:
         params.use_cpu = True
         params.device = torch.device('cpu')

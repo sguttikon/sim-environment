@@ -319,10 +319,10 @@ class TransitionModel(nn.Module):
         delta_y = sin_th * odom_x + cos_th * odom_y
         delta_th = odom_th
 
-        delta_x = delta_x + torch.normal(mean=0.0, std=1.0, size=delta_x.shape).to(self.params.device) * translation_std
-        delta_y = delta_y + torch.normal(mean=0.0, std=1.0, size=delta_y.shape).to(self.params.device) * translation_std
+        noise_x = torch.normal(mean=0.0, std=1.0, size=delta_x.shape).to(self.params.device) * translation_std
+        noise_y = torch.normal(mean=0.0, std=1.0, size=delta_y.shape).to(self.params.device) * translation_std
 
-        return torch.stack([part_x + delta_x, part_y + delta_y, part_th + delta_th], axis=-1)
+        return torch.stack([part_x + delta_x + noise_x, part_y + delta_y + noise_y, part_th + delta_th], axis=-1)
 
 class ObservationModel(nn.Module):
 
@@ -581,7 +581,7 @@ class LikelihoodNet(nn.Module):
         #         1, activation=None, use_bias=True)(x)
         # print(lik.shape)
 
-        return lik
+        return lik # [batch_size*num_particles, 1]
 
 # reference: https://discuss.pytorch.org/t/locally-connected-layers/26979/2
 from torch.nn.modules.utils import _pair
@@ -767,6 +767,14 @@ class PFCell(nn.Module):
         particle_states, particle_weights = state
         observation, odometry, global_maps = inputs
 
+        # sanity check
+        batch_size, num_particles = particle_states.shape[:2]
+        assert list(particle_states.shape) == [batch_size, num_particles, 3]
+        assert list(particle_weights.shape) == [batch_size, num_particles]
+        assert list(global_maps.shape) == [batch_size, 1, 3000, 3000]
+        assert list(observation.shape) == [batch_size, 3, 56, 56]
+        assert list(odometry.shape) == [batch_size, 3]
+
         # observation update
         lik = self.observation_update(global_maps, particle_states, observation)
         particle_weights = particle_weights + lik  # unnormalized
@@ -787,8 +795,7 @@ class PFCell(nn.Module):
         return outputs, state
 
     def observation_update(self, global_maps, particle_states, observation):
-        batch_size = self.params.batch_size
-        num_particles = self.params.num_particles
+        batch_size, num_particles = particle_states.shape[:2]
 
         # [batch_size, K, 3], [batch_size, C, H, W]
         local_maps = self.trans_map_model(particle_states, global_maps)
