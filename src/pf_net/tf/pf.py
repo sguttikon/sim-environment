@@ -308,7 +308,7 @@ class TransitionModel(nn.Module):
         odometry = odometry.unsqueeze(1)
         odom_x, odom_y, odom_th = torch.unbind(odometry, dim=-1)
 
-        noise_th = torch.normal(mean=0.0, std=1.0, size=part_th.shape).to(self.params.device) * rotation_std
+        noise_th = torch.normal(mean=0.0, std=1.0, size=part_th.shape).to(self.params.device, non_blocking=True) * rotation_std
 
         # add orientation noise before translation
         part_th = part_th + noise_th
@@ -319,8 +319,8 @@ class TransitionModel(nn.Module):
         delta_y = sin_th * odom_x + cos_th * odom_y
         delta_th = odom_th
 
-        delta_x = delta_x + torch.normal(mean=0.0, std=1.0, size=delta_x.shape).to(self.params.device) * translation_std
-        delta_y = delta_y + torch.normal(mean=0.0, std=1.0, size=delta_y.shape).to(self.params.device) * translation_std
+        delta_x = delta_x + torch.normal(mean=0.0, std=1.0, size=delta_x.shape).to(self.params.device, non_blocking=True) * translation_std
+        delta_y = delta_y + torch.normal(mean=0.0, std=1.0, size=delta_y.shape).to(self.params.device, non_blocking=True) * translation_std
 
         return torch.stack([part_x + delta_x, part_y + delta_y, part_th + delta_th], axis=-1)
 
@@ -622,8 +622,8 @@ class SpatialTransformerNet(nn.Module):
         total_samples = batch_size * num_particles
         flat_states = torch.reshape(particle_states, (total_samples, 3))
 
-        zero = torch.full((total_samples, ), 0).to(self.params.device)
-        one = torch.full((total_samples, ), 1).to(self.params.device)
+        zero = torch.full((total_samples, ), 0).to(self.params.device, non_blocking=True)
+        one = torch.full((total_samples, ), 1).to(self.params.device, non_blocking=True)
 
         input_map_shape = global_maps.shape
         # affine transformation
@@ -646,8 +646,8 @@ class SpatialTransformerNet(nn.Module):
 
         # 3. optional scale down the map
         window_scaler = 8
-        scale_x = torch.full((total_samples, ), float(self.params.local_map_size[0] * window_scaler) * width_inverse).to(self.params.device)
-        scale_y = torch.full((total_samples, ), float(self.params.local_map_size[1] * window_scaler) * height_inverse).to(self.params.device)
+        scale_x = torch.full((total_samples, ), float(self.params.local_map_size[0] * window_scaler) * width_inverse).to(self.params.device, non_blocking=True)
+        scale_y = torch.full((total_samples, ), float(self.params.local_map_size[1] * window_scaler) * height_inverse).to(self.params.device, non_blocking=True)
         scalem = torch.stack([scale_x, zero, zero, zero, scale_y, zero, zero, zero, one], axis=1)
         scalem = torch.reshape(scalem, (total_samples, 3, 3))
 
@@ -690,7 +690,7 @@ class ResampleNet(nn.Module):
         particle_weights = particle_weights - torch.logsumexp(particle_weights, dim=-1, keepdim=True)
 
         # construct uniform weights
-        uniform_weights = torch.full((batch_size, num_particles), np.log(1.0/float(num_particles))).to(self.params.device)
+        uniform_weights = torch.full((batch_size, num_particles), np.log(1.0/float(num_particles))).to(self.params.device, non_blocking=True)
 
         # build sampling distribution q(s) and update particle weights
         if alpha < 1.0:
@@ -714,7 +714,7 @@ class ResampleNet(nn.Module):
         indices = torch.cat(idx, dim=-1)    #   [batch_size, num_particles]
 
         # index into particles
-        helper = torch.arange(0, batch_size * num_particles, step=num_particles, dtype=torch.int64).to(self.params.device) # [batch_size]
+        helper = torch.arange(0, batch_size * num_particles, step=num_particles, dtype=torch.int64).to(self.params.device, non_blocking=True) # [batch_size]
         indices = indices + helper.unsqueeze(1)
 
         indices = torch.reshape(indices, (batch_size * num_particles, ))
@@ -758,8 +758,17 @@ class PFCell(nn.Module):
         self.likeli_net = LikelihoodNet()
 
     def forward(self, inputs, state):
+        batch_size = self.params.batch_size
+        num_particles = self.params.num_particles
         particle_states, particle_weights = state
         observation, odometry, global_maps = inputs
+
+        # sanity check
+        assert list(particle_states.shape) == [batch_size, num_particles, 3]
+        assert list(particle_weights.shape) == [batch_size, num_particles]
+        assert list(global_maps.shape) == [batch_size, 1, 3000, 3000]
+        assert list(observation.shape) == [batch_size, 3, 56, 56]
+        assert list(odometry.shape) == [batch_size, 3]
 
         # observation update
         lik = self.observation_update(global_maps, particle_states, observation)
@@ -787,35 +796,20 @@ class PFCell(nn.Module):
         # [batch_size, K, 3], [batch_size, C, H, W]
         local_maps = self.trans_map_model(particle_states, global_maps)
 
-        # sanity check
-        assert list(local_maps.shape) == [batch_size, num_particles, 1, 28, 28]
-
         # flatten batch and particle dimensions
         local_maps = torch.reshape(local_maps, [batch_size * num_particles] + list(local_maps.shape[2:]))
         map_features = self.map_model(local_maps)
 
-        # sanity check
-        assert list(map_features.shape) == [batch_size*num_particles, 8, 14, 14]
-
         # [batch_size, C, H, W]
         obs_features = self.observation_model(observation)
-
-        # sanity check
-        assert list(obs_features.shape) == [batch_size, 16, 14, 14]
 
         # tile observation features and flatten batch and particle dimensions
         obs_features = obs_features.unsqueeze(1).repeat(1, num_particles, 1, 1, 1)
         obs_features = torch.reshape(obs_features, [batch_size * num_particles] + list(obs_features.shape[2:]))
 
-        # sanity check
-        assert list(obs_features.shape) == [batch_size * num_particles, 16, 14, 14]
-
         # merge features and process further
         joint_features = torch.cat([map_features, obs_features], axis=1)
         lik = self.likeli_net(joint_features)
-
-        # sanity check
-        assert list(lik.shape) == [batch_size * num_particles, 1]
 
         # [batch_size, num_particles] unflatten batch and particle dimensions
         lik = torch.reshape(lik, [batch_size, num_particles])
@@ -827,10 +821,6 @@ class PFCell(nn.Module):
         # [batch_size, K, 3] [batch_size, K]
         new_particle_states, new_particle_weights = \
             self.resample_model(particle_states, particle_weights, self.params.alpha_resample_ratio)
-
-        # sanity check
-        assert list(new_particle_states.shape) == [batch_size, num_particles, 3]
-        assert list(new_particle_weights.shape) == [batch_size, num_particles]
 
         return new_particle_states, new_particle_weights
 
