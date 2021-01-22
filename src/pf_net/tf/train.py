@@ -21,13 +21,13 @@ class PFNet(object):
                     pf.ToTensor(),
         ])
         train_dataset = pf.House3DTrajDataset(params, params.train_file, transform=composed)
-        self.train_data_loader = pf.DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
+        self.train_data_loader = DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
 
         self.pf_cell = pf.PFCell(params).to(params.device)
         if params.multiple_gpu:
-            self.pf_cell = torch.nn.parallel.DistributedDataParallel(self.pf_cell, device_ids=list(range(torch.cuda.device_count())))
-            for i in list(range(torch.cuda.device_count())):
+            for i in params.device_ids:
                 torch.cuda.set_device(i)
+            self.pf_cell = torch.nn.DataParallel(self.pf_cell, device_ids=params.device_ids)
 
         model_params =  list(self.pf_cell.parameters())
         self.optimizer = torch.optim.Adam(model_params, lr=2e-4, weight_decay=0.01)
@@ -210,9 +210,12 @@ if __name__ == '__main__':
 
     if not params.use_cpu and torch.cuda.is_available():
         params.device = torch.device('cuda')
+        params.device_ids = list(range(torch.cuda.device_count()))
+        print('# GPUs detected: ', len(params.device_ids))
     else:
         params.device = torch.device('cpu')
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1' # tensorflow
+        print('No GPU. switching to CPU')
 
     params.trajlen = 24
     params.map_pixel_in_meters = 0.02
