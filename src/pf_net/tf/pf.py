@@ -308,7 +308,9 @@ class TransitionModel(nn.Module):
         odometry = odometry.unsqueeze(1)
         odom_x, odom_y, odom_th = torch.unbind(odometry, dim=-1)
 
-        noise_th = torch.normal(mean=0.0, std=1.0, size=part_th.shape).to(self.params.device, non_blocking=True) * rotation_std
+        noise_th = torch.normal(mean=0.0, std=1.0, size=part_th.shape) * rotation_std
+        if not self.params.use_cpu:
+            noise_th = noise_th.cuda()
 
         # add orientation noise before translation
         part_th = part_th + noise_th
@@ -319,10 +321,14 @@ class TransitionModel(nn.Module):
         delta_y = sin_th * odom_x + cos_th * odom_y
         delta_th = odom_th
 
-        delta_x = delta_x + torch.normal(mean=0.0, std=1.0, size=delta_x.shape).to(self.params.device, non_blocking=True) * translation_std
-        delta_y = delta_y + torch.normal(mean=0.0, std=1.0, size=delta_y.shape).to(self.params.device, non_blocking=True) * translation_std
+        noise_x = torch.normal(mean=0.0, std=1.0, size=delta_x.shape) * translation_std
+        noise_y = torch.normal(mean=0.0, std=1.0, size=delta_y.shape) * translation_std
 
-        return torch.stack([part_x + delta_x, part_y + delta_y, part_th + delta_th], axis=-1)
+        if not self.params.use_cpu:
+            noise_x = noise_x.cuda()
+            noise_y = noise_y.cuda()
+
+        return torch.stack([part_x + delta_x + noise_x, part_y + delta_y + noise_y, part_th + delta_th], axis=-1)
 
 class ObservationModel(nn.Module):
 
@@ -622,8 +628,11 @@ class SpatialTransformerNet(nn.Module):
         total_samples = batch_size * num_particles
         flat_states = torch.reshape(particle_states, (total_samples, 3))
 
-        zero = torch.full((total_samples, ), 0).to(self.params.device, non_blocking=True)
-        one = torch.full((total_samples, ), 1).to(self.params.device, non_blocking=True)
+        zero = torch.full((total_samples, ), 0)
+        one = torch.full((total_samples, ), 1)
+        if not self.params.use_cpu:
+            zero = zero.cuda()
+            one = one.cuda()
 
         input_map_shape = global_maps.shape
         # affine transformation
@@ -646,8 +655,11 @@ class SpatialTransformerNet(nn.Module):
 
         # 3. optional scale down the map
         window_scaler = 8
-        scale_x = torch.full((total_samples, ), float(self.params.local_map_size[0] * window_scaler) * width_inverse).to(self.params.device, non_blocking=True)
-        scale_y = torch.full((total_samples, ), float(self.params.local_map_size[1] * window_scaler) * height_inverse).to(self.params.device, non_blocking=True)
+        scale_x = torch.full((total_samples, ), float(self.params.local_map_size[0] * window_scaler) * width_inverse)
+        scale_y = torch.full((total_samples, ), float(self.params.local_map_size[1] * window_scaler) * height_inverse)
+        if not self.params.use_cpu:
+            scale_x = scale_x.cuda()
+            scale_y = scale_y.cuda()
         scalem = torch.stack([scale_x, zero, zero, zero, scale_y, zero, zero, zero, one], axis=1)
         scalem = torch.reshape(scalem, (total_samples, 3, 3))
 
@@ -690,7 +702,9 @@ class ResampleNet(nn.Module):
         particle_weights = particle_weights - torch.logsumexp(particle_weights, dim=-1, keepdim=True)
 
         # construct uniform weights
-        uniform_weights = torch.full((batch_size, num_particles), np.log(1.0/float(num_particles))).to(self.params.device, non_blocking=True)
+        uniform_weights = torch.full((batch_size, num_particles), np.log(1.0/float(num_particles)))
+        if not self.params.use_cpu:
+            uniform_weights = uniform_weights.cuda()
 
         # build sampling distribution q(s) and update particle weights
         if alpha < 1.0:
@@ -714,7 +728,9 @@ class ResampleNet(nn.Module):
         indices = torch.cat(idx, dim=-1)    #   [batch_size, num_particles]
 
         # index into particles
-        helper = torch.arange(0, batch_size * num_particles, step=num_particles, dtype=torch.int64).to(self.params.device, non_blocking=True) # [batch_size]
+        helper = torch.arange(0, batch_size * num_particles, step=num_particles, dtype=torch.int64) # [batch_size]
+        if not self.params.use_cpu:
+            helper = helper.cuda()
         indices = indices + helper.unsqueeze(1)
 
         indices = torch.reshape(indices, (batch_size * num_particles, ))

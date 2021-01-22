@@ -24,12 +24,11 @@ class PFNet(object):
         batch_size = self.params.batch_size
         num_particles = self.params.num_particles
 
-        odometries = episode_batch['odometry'].to(params.device, non_blocking=True)
-        global_maps = episode_batch['global_map'].to(params.device, non_blocking=True)
-        observations = episode_batch['observation'].to(params.device, non_blocking=True)
-
-        init_particle_states = episode_batch['init_particles'].to(params.device, non_blocking=True)
-        init_particle_weights = torch.full((batch_size, num_particles), np.log(1.0/float(num_particles))).to(params.device, non_blocking=True)
+        odometries = episode_batch['odometry']
+        global_maps = episode_batch['global_map']
+        observations = episode_batch['observation']
+        init_particle_states = episode_batch['init_particles']
+        init_particle_weights = episode_batch['init_particle_weights']
 
         # start with episode trajectory state with init particles and weights
         state = init_particle_states, init_particle_weights
@@ -55,6 +54,20 @@ class PFNet(object):
 
         return outputs
 
+    def preprocess_data(self, batch_samples):
+        episode_batch = batch_samples
+        episode_batch['init_particle_weights'] = torch.full((self.params.batch_size, self.params.num_particles), np.log(1.0/float(self.params.num_particles)))
+
+        if not self.params.use_cpu:
+            episode_batch['odometry'] = episode_batch['odometry'].cuda()
+            episode_batch['global_map'] = episode_batch['global_map'].cuda()
+            episode_batch['observation'] = episode_batch['observation'].cuda()
+            episode_batch['true_states'] = episode_batch['true_states'].cuda()
+            episode_batch['init_particles'] = episode_batch['init_particles'].cuda()
+            episode_batch['init_particle_weights'] = episode_batch['init_particle_weights'].cuda()
+
+        return episode_batch
+
     def run_training(self):
         trajlen = self.params.trajlen
         batch_size = self.params.batch_size
@@ -66,18 +79,25 @@ class PFNet(object):
         ])
         train_dataset = pf.House3DTrajDataset(params, params.train_file, transform=composed)
         train_loader = DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers, pin_memory=True)
-        
+
         # define model
         model = pf.PFCell(params)
+        if not self.params.use_cpu:
+            model.cuda()
+
         if params.multiple_gpu:
+            model.transition_model = torch.nn.DataParallel(model.transition_model)
+            model.trans_map_model = torch.nn.DataParallel(model.trans_map_model)
+            model.resample_model = torch.nn.DataParallel(model.resample_model)
+            model.observation_model = torch.nn.DataParallel(model.observation_model)
+            model.map_model = torch.nn.DataParallel(model.map_model)
+            model.likeli_net = torch.nn.DataParallel(model.likeli_net)
             model = torch.nn.DataParallel(model)
-            params.batch_size *= params.device_count
-        model.to(params.device)
 
         # define optimizer
         self.optimizer = torch.optim.Adam(model.parameters(), lr=2e-4, weight_decay=0.01)
 
-        print('data loaded initialized')
+        print('dataloader initialized')
         # iterate over num_epochs
         for epoch in range(self.params.num_epochs):
             b_loss_total = []
@@ -85,10 +105,10 @@ class PFNet(object):
             model.train()
             # iterate over num_batches
             for batch_idx, batch_samples in enumerate(train_loader):
-                episode_batch = batch_samples
-                labels = episode_batch['true_states'].to(params.device, non_blocking=True)
+                episode_batch = self.preprocess_data(batch_samples)
 
                 # skip if batch_size doesn't match
+                labels = episode_batch['true_states']
                 if batch_size != labels.shape[0]:
                     break
 
@@ -213,6 +233,7 @@ if __name__ == '__main__':
         print('GPU detected: ', os.environ['CUDA_VISIBLE_DEVICES'])
         params.device_count = torch.cuda.device_count()
     else:
+        params.use_cpu = True
         params.device = torch.device('cpu')
         print('No GPU. switching to CPU')
 
