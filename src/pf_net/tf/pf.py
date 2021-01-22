@@ -319,10 +319,266 @@ class TransitionModel(nn.Module):
         delta_y = sin_th * odom_x + cos_th * odom_y
         delta_th = odom_th
 
-        noise_x = torch.normal(mean=0.0, std=1.0, size=delta_x.shape).to(self.params.device) * translation_std
-        noise_y = torch.normal(mean=0.0, std=1.0, size=delta_y.shape).to(self.params.device) * translation_std
+        delta_x = delta_x + torch.normal(mean=0.0, std=1.0, size=delta_x.shape).to(self.params.device) * translation_std
+        delta_y = delta_y + torch.normal(mean=0.0, std=1.0, size=delta_y.shape).to(self.params.device) * translation_std
 
-        return torch.stack([part_x + delta_x + noise_x, part_y + delta_y + noise_y, part_th + delta_th], axis=-1)
+        return torch.stack([part_x + delta_x, part_y + delta_y, part_th + delta_th], axis=-1)
+
+class ObservationModel(nn.Module):
+
+    def __init__(self):
+        super(ObservationModel, self).__init__()
+
+        block1_layers = [
+            nn.Conv2d(3, 128, kernel_size=3, stride=1, padding=1, dilation=1, bias=True),
+            nn.Conv2d(3, 128, kernel_size=5, stride=1, padding=2, dilation=1, bias=True),
+            nn.Conv2d(3, 64, kernel_size=5, stride=1, padding=4, dilation=2, bias=True),
+            nn.Conv2d(3, 64, kernel_size=5, stride=1, padding=8, dilation=4, bias=True)
+        ]
+        self.block1 = nn.ModuleList(block1_layers)
+
+        size = [384, 28, 28]
+        block2_layers= [
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
+            nn.LayerNorm(size),
+            nn.ReLU()
+        ]
+        self.block2 = nn.ModuleList(block2_layers)
+
+        size = [16, 14, 14]
+        block3_layers= [
+            nn.Conv2d(384, 16, kernel_size=3, stride=1, padding=1, dilation=1, bias=True),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
+            nn.LayerNorm(size),
+            nn.ReLU()
+        ]
+        self.block3 = nn.ModuleList(block3_layers)
+
+    def forward(self, observation: Tensor) -> Tensor:
+        x = observation
+
+        # block1
+        convs = []
+        for _, l in enumerate(self.block1):
+            convs.append(l(x))
+        x = torch.cat(convs, axis=1)
+
+        # block2
+        for _, l in enumerate(self.block2):
+            x = l(x)
+
+        # block3
+        for _, l in enumerate(self.block3):
+            x = l(x)
+
+        # x = observation.cpu().detach().numpy()
+        # x = tf.convert_to_tensor(x)
+        # data_format = 'channels_last'
+        # layer_i = 1
+        # convs = [
+        #         tf.keras.layers.Conv2D(
+        #             128, (3, 3), activation=None, padding='same', data_format=data_format,
+        #             use_bias=True)(x),
+        #         tf.keras.layers.Conv2D(
+        #             128, (5, 5), activation=None, padding='same', data_format=data_format,
+        #             use_bias=True)(x),
+        #         tf.keras.layers.Conv2D(
+        #             64, (5, 5), activation=None, padding='same', data_format=data_format,
+        #             dilation_rate=(2, 2), use_bias=True)(x),
+        #         tf.keras.layers.Conv2D(
+        #             64, (5, 5), activation=None, padding='same', data_format=data_format,
+        #             dilation_rate=(4, 4), use_bias=True)(x),
+        # ]
+        # x = tf.concat(convs, axis=-1)
+        # x = tf.keras.layers.MaxPool2D(pool_size=(3, 3), strides=(2, 2), padding='same')(x)
+        #
+        # x = tf.keras.layers.Conv2D(
+        #     16, (3, 3), activation=None, padding='same', data_format=data_format,
+        #         use_bias=True)(x)
+        # x = tf.keras.layers.MaxPool2D(pool_size=(3, 3), strides=(2, 2), padding='same')(x)
+        # print(x.shape)
+
+        return x # [batch_size, 16, 14, 14]
+
+class MapModel(nn.Module):
+
+    def __init__(self):
+        super(MapModel, self).__init__()
+
+        block1_layers = [
+            nn.Conv2d(1, 24, kernel_size=3, stride=1, padding=1, dilation=1, bias=True),
+            nn.Conv2d(1, 16, kernel_size=5, stride=1, padding=2, dilation=1, bias=True),
+            nn.Conv2d(1, 8, kernel_size=7, stride=1, padding=3, dilation=1, bias=True),
+            nn.Conv2d(1, 8, kernel_size=7, stride=1, padding=6, dilation=2, bias=True),
+            nn.Conv2d(1, 8, kernel_size=7, stride=1, padding=9, dilation=3, bias=True),
+        ]
+        self.block1 = nn.ModuleList(block1_layers)
+
+        block2_layers= [
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        ]
+        self.block2 = nn.ModuleList(block2_layers)
+
+        block3_layers= [
+            nn.Conv2d(64, 4, kernel_size=3, stride=1, padding=1, dilation=1, bias=True),
+            nn.Conv2d(64, 4, kernel_size=5, stride=1, padding=2, dilation=1, bias=True),
+        ]
+        self.block3 = nn.ModuleList(block3_layers)
+
+        size = [8, 14, 14]
+        block4_layers= [
+            nn.LayerNorm(size),
+            nn.ReLU()
+        ]
+        self.block4 = nn.ModuleList(block4_layers)
+
+    def forward(self, local_maps: Tensor) -> Tensor:
+        x = local_maps
+
+        # block1
+        convs = []
+        for _, l in enumerate(self.block1):
+            convs.append(l(x))
+        x = torch.cat(convs, axis=1)
+
+        # block2
+        for _, l in enumerate(self.block2):
+            x = l(x)
+
+        # block3
+        convs = []
+        for _, l in enumerate(self.block3):
+            convs.append(l(x))
+        x = torch.cat(convs, axis=1)
+
+        # block4
+        for _, l in enumerate(self.block4):
+            x = l(x)
+
+        # x = local_maps.cpu().detach().numpy()
+        # x = np.transpose(x, (0, 2, 3, 1))
+        # x = tf.convert_to_tensor(x)
+        # data_format = 'channels_last'
+        # layer_i = 1
+        # convs = [
+        #         tf.keras.layers.Conv2D(
+        #             24, (3, 3), activation=None, padding='same', data_format=data_format,
+        #             use_bias=True)(x),
+        #         tf.keras.layers.Conv2D(
+        #             16, (5, 5), activation=None, padding='same', data_format=data_format,
+        #             use_bias=True)(x),
+        #         tf.keras.layers.Conv2D(
+        #             8, (7, 7), activation=None, padding='same', data_format=data_format,
+        #             use_bias=True)(x),
+        #         tf.keras.layers.Conv2D(
+        #             8, (7, 7), activation=None, padding='same', data_format=data_format,
+        #             dilation_rate=(2, 2), use_bias=True)(x),
+        #         tf.keras.layers.Conv2D(
+        #             8, (7, 7), activation=None, padding='same', data_format=data_format,
+        #             dilation_rate=(3, 3), use_bias=True)(x),
+        # ]
+        # x = tf.concat(convs, axis=-1)
+        # x = tf.keras.layers.MaxPool2D(pool_size=(3, 3), strides=(2, 2), padding='same')(x)
+        #
+        # print(x.shape)
+        # convs = [
+        #         tf.keras.layers.Conv2D(
+        #             4, (3, 3), activation=None, padding='same', data_format=data_format,
+        #             use_bias=True)(x),
+        #         tf.keras.layers.Conv2D(
+        #             4, (5, 5), activation=None, padding='same', data_format=data_format,
+        #             use_bias=True)(x),
+        # ]
+        # x = tf.concat(convs, axis=-1)
+        # print(x.shape)
+        return x # [batch_size*num_particles, 8, 14, 14]
+
+class LikelihoodNet(nn.Module):
+
+    def __init__(self):
+        super(LikelihoodNet, self).__init__()
+
+        output_size = (12, 12)
+
+        block1_layers= [
+            LocallyConnected2d(24, 8, output_size, kernel_size=3, stride=1, bias=True),
+            nn.ReLU()
+        ]
+        self.block1 = nn.ModuleList(block1_layers)
+
+        block2_layers= [
+            nn.ZeroPad2d((1, 1, 1, 1)),
+            LocallyConnected2d(24, 8, output_size, kernel_size=5, stride=1, bias=True),
+            nn.ReLU()
+        ]
+        self.block2 = nn.ModuleList(block2_layers)
+
+        block3_layers= [
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=0)
+        ]
+        self.block3 = nn.ModuleList(block3_layers)
+
+        in_channels = 16 * 5 * 5
+        block4_layers= [
+            nn.Linear(in_channels, 1, bias=True)
+        ]
+        self.block4 = nn.ModuleList(block4_layers)
+
+
+    def forward(self, joint_features: Tensor) -> Tensor:
+        x = joint_features
+        total_samples = joint_features.shape[0]
+        output_size = (12, 12)
+
+        # block1
+        x1 = x
+        for _, l in enumerate(self.block1):
+            x1 = l(x1)
+
+        # block2
+        x2 = x
+        for _, l in enumerate(self.block2):
+            x2 = l(x2)
+
+        x = torch.cat([x1, x2], axis=1)
+
+        # block3
+        for _, l in enumerate(self.block3):
+            x = l(x)
+
+        # [batch_size*num_particles, 16, 5, 5]
+        x = torch.reshape(x, (total_samples, -1))
+
+        # block4
+        for _, l in enumerate(self.block4):
+            x = l(x)
+
+        lik = x
+
+        # x = joint_features.cpu().detach().numpy()
+        # x = np.transpose(x, (0, 2, 3, 1))
+        # x = tf.convert_to_tensor(x)
+        # data_format = 'channels_last'
+        # layer_i = 1
+        #
+        # # pad manually to match different kernel sizes
+        # x_pad1 = tf.pad(x, paddings=tf.constant([[0, 0], [1, 1,], [1, 1], [0, 0]]))
+        # convs = [
+        #     tf.keras.layers.LocallyConnected2D(
+        #         8, (3, 3), activation='relu', padding='valid', data_format=data_format,
+        #         use_bias=True)(x),
+        #     tf.keras.layers.LocallyConnected2D(
+        #         8, (5, 5), activation='relu', padding='valid', data_format=data_format,
+        #         use_bias=True)(x_pad1),
+        # ]
+        # x = tf.concat(convs, axis=-1)
+        # x = tf.keras.layers.MaxPool2D(pool_size=(3, 3), strides=(2, 2), padding='valid')(x)
+        # x = tf.reshape(x, (total_samples, -1))
+        # lik = tf.keras.layers.Dense(
+        #         1, activation=None, use_bias=True)(x)
+        # print(lik.shape)
+
+        return lik
 
 # reference: https://discuss.pytorch.org/t/locally-connected-layers/26979/2
 from torch.nn.modules.utils import _pair
@@ -375,16 +631,16 @@ class SpatialTransformerNet(nn.Module):
         width_inverse = 1.0 / input_map_shape[3]
 
         # 1. translate the global map s.t. the center is at the particle state
-        translate_x = ((flat_states[:, 0] * width_inverse * 2.0) - 1.0).to(self.params.device)
-        translate_y = ((flat_states[:, 1] * height_inverse * 2.0) - 1.0).to(self.params.device)
+        translate_x = (flat_states[:, 0] * width_inverse * 2.0) - 1.0
+        translate_y = (flat_states[:, 1] * height_inverse * 2.0) - 1.0
         transm1 = torch.stack([one, zero, translate_x, zero, one, translate_y, zero, zero, one], axis=1)
         transm1 = torch.reshape(transm1, (total_samples, 3, 3))
 
         # 2. rotate the global map s.t. the oriantation matches the particle state
         # normalize orientations
         theta = normalize(flat_states[:, 2], isTensor=True)
-        costheta = torch.cos(theta).to(self.params.device)
-        sintheta = torch.sin(theta).to(self.params.device)
+        costheta = torch.cos(theta)
+        sintheta = torch.sin(theta)
         rotm = torch.stack([costheta, sintheta, zero, -sintheta, costheta, zero, zero, zero, one], axis=1)
         rotm = torch.reshape(rotm, (total_samples, 3, 3))
 
@@ -406,14 +662,14 @@ class SpatialTransformerNet(nn.Module):
         # transform_m = torch.matmul(transform_m, transm2)
 
         # reshape to the format expected by the spatial transform network
-        transform_m = torch.reshape(transform_m[:, :2], (batch_size * num_particles, 2, 3))
-        grid_size = torch.Size((batch_size * num_particles, input_map_shape[1], self.params.local_map_size[0], self.params.local_map_size[1]))
-        grid = F.affine_grid(transform_m, grid_size, align_corners=False).float()
+        transform_m = torch.reshape(transform_m[:, :2], (batch_size, num_particles, 2, 3))
 
         output_list = []
         # iterate over num_particles
         for i in range(num_particles):
-            local_map = F.grid_sample(global_maps, grid[i*batch_size: (i+1)*batch_size, :, :, :], align_corners=False)
+            grid_size = torch.Size((batch_size, input_map_shape[1], self.params.local_map_size[0], self.params.local_map_size[1]))
+            grid = F.affine_grid(transform_m[:, i], grid_size, align_corners=False).float()
+            local_map = F.grid_sample(global_maps, grid, align_corners=False)
             output_list.append(local_map)
         local_maps = torch.stack(output_list, axis=1)
 
@@ -491,59 +747,52 @@ class ResampleNet(nn.Module):
 class PFCell(nn.Module):
     def __init__(self, params):
         super(PFCell, self).__init__()
+
         self.params = params
-        self.dummy_param = nn.Parameter(torch.empty(0))
-        self.build_map_model()
+
+        self.transition_model = TransitionModel(params)
+        self.trans_map_model = SpatialTransformerNet(params)
+        self.resample_model = ResampleNet(params)
+        self.observation_model = ObservationModel()
+        self.map_model = MapModel()
+        self.likeli_net = LikelihoodNet()
 
     def forward(self, inputs, state):
         particle_states, particle_weights = state
         observation, odometry, global_maps = inputs
 
-        # sanity check
-        batch_size, num_particles = particle_states.shape[:2]
-        assert list(particle_states.shape) == [batch_size, num_particles, 3]
-        assert list(particle_weights.shape) == [batch_size, num_particles]
-        assert list(global_maps.shape) == [batch_size, 1, 3000, 3000]
-        assert list(observation.shape) == [batch_size, 3, 56, 56]
-        assert list(odometry.shape) == [batch_size, 3]
-
-        particle_states = particle_states.to(self.params.device)
-        particle_weights = particle_weights.to(self.params.device)
-        observation = observation.to(self.params.device)
-        odometry = odometry.to(self.params.device)
-        global_maps = global_maps.to(self.params.device)
-
         # observation update
         lik = self.observation_update(global_maps, particle_states, observation)
-        particle_weights = particle_weights + lik  # unnormalized
+        particle_weights += lik  # unnormalized
 
-        # # resample
-        # if self.params.resample:
-        #     particle_states, particle_weights = self.resample(particle_states, particle_weights)
+        # resample
+        if self.params.resample:
+            particle_states, particle_weights = self.resample(particle_states, particle_weights)
 
         # construct output before motion update
         outputs = particle_states, particle_weights
 
-        # # motion update
-        # particle_states = self.motion_update(particle_states, odometry)
-        #
-        # # construct new state
-        # state = particle_states, particle_weights
+        # motion update
+        particle_states = self.motion_update(particle_states, odometry)
+
+        # construct new state
+        state = particle_states, particle_weights
 
         return outputs, state
 
     def observation_update(self, global_maps, particle_states, observation):
-        batch_size, num_particles = particle_states.shape[:2]
+        batch_size = self.params.batch_size
+        num_particles = self.params.num_particles
 
         # [batch_size, K, 3], [batch_size, C, H, W]
-        local_maps = self.get_local_maps(particle_states, global_maps)
+        local_maps = self.trans_map_model(particle_states, global_maps)
 
         # flatten batch and particle dimensions
         local_maps = torch.reshape(local_maps, [batch_size * num_particles] + list(local_maps.shape[2:]))
-        map_features = self.map_features(local_maps)
+        map_features = self.map_model(local_maps)
 
         # [batch_size, C, H, W]
-        obs_features = self.observation_features(observation)
+        obs_features = self.observation_model(observation)
 
         # tile observation features and flatten batch and particle dimensions
         obs_features = obs_features.unsqueeze(1).repeat(1, num_particles, 1, 1, 1)
@@ -551,7 +800,7 @@ class PFCell(nn.Module):
 
         # merge features and process further
         joint_features = torch.cat([map_features, obs_features], axis=1)
-        lik = self.likelihoods(joint_features)
+        lik = self.likeli_net(joint_features)
 
         # [batch_size, num_particles] unflatten batch and particle dimensions
         lik = torch.reshape(lik, [batch_size, num_particles])
@@ -572,224 +821,6 @@ class PFCell(nn.Module):
         particle_states = self.transition_model(particle_states, odometry)
 
         return particle_states
-
-    def build_observation_model(self):
-
-        block1_layers = [
-            nn.Conv2d(3, 128, kernel_size=3, stride=1, padding=1, dilation=1, bias=True),
-            nn.Conv2d(3, 128, kernel_size=5, stride=1, padding=2, dilation=1, bias=True),
-            nn.Conv2d(3, 64, kernel_size=5, stride=1, padding=4, dilation=2, bias=True),
-            nn.Conv2d(3, 64, kernel_size=5, stride=1, padding=8, dilation=4, bias=True)
-        ]
-        self.block1 = nn.ModuleList(block1_layers)
-
-        size = [384, 28, 28]
-        block2_layers= [
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
-            nn.LayerNorm(size),
-            nn.ReLU()
-        ]
-        self.block2 = nn.ModuleList(block2_layers)
-
-        size = [16, 14, 14]
-        block3_layers= [
-            nn.Conv2d(384, 16, kernel_size=3, stride=1, padding=1, dilation=1, bias=True),
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
-            nn.LayerNorm(size),
-            nn.ReLU()
-        ]
-        self.block3 = nn.ModuleList(block3_layers)
-
-    def build_map_model(self):
-
-        block1_layers = [
-            nn.Conv2d(1, 24, kernel_size=3, stride=1, padding=1, dilation=1, bias=True),
-            nn.Conv2d(1, 16, kernel_size=5, stride=1, padding=2, dilation=1, bias=True),
-            nn.Conv2d(1, 8, kernel_size=7, stride=1, padding=3, dilation=1, bias=True),
-            nn.Conv2d(1, 8, kernel_size=7, stride=1, padding=6, dilation=2, bias=True),
-            nn.Conv2d(1, 8, kernel_size=7, stride=1, padding=9, dilation=3, bias=True),
-        ]
-        self.block1 = nn.ModuleList(block1_layers)
-
-        block2_layers= [
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        ]
-        self.block2 = nn.ModuleList(block2_layers)
-
-        block3_layers= [
-            nn.Conv2d(64, 4, kernel_size=3, stride=1, padding=1, dilation=1, bias=True),
-            nn.Conv2d(64, 4, kernel_size=5, stride=1, padding=2, dilation=1, bias=True),
-        ]
-        self.block3 = nn.ModuleList(block3_layers)
-
-        size = [8, 14, 14]
-        block4_layers= [
-            nn.LayerNorm(size),
-            nn.ReLU()
-        ]
-        self.block4 = nn.ModuleList(block4_layers)
-
-    def build_likelihood_model(self):
-
-        output_size = (12, 12)
-
-        block1_layers= [
-            LocallyConnected2d(24, 8, output_size, kernel_size=3, stride=1, bias=True),
-            nn.ReLU()
-        ]
-        self.block1 = nn.ModuleList(block1_layers)
-
-        block2_layers= [
-            nn.ZeroPad2d((1, 1, 1, 1)),
-            LocallyConnected2d(24, 8, output_size, kernel_size=5, stride=1, bias=True),
-            nn.ReLU()
-        ]
-        self.block2 = nn.ModuleList(block2_layers)
-
-        block3_layers= [
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=0)
-        ]
-        self.block3 = nn.ModuleList(block3_layers)
-
-        in_channels = 16 * 5 * 5
-        block4_layers= [
-            nn.Linear(in_channels, 1, bias=True)
-        ]
-        self.block4 = nn.ModuleList(block4_layers)
-
-    def observation_features(self, observation: Tensor) -> Tensor:
-        x = observation
-
-        # block1
-        convs = []
-        for _, l in enumerate(self.block1):
-            convs.append(l(x))
-        x = torch.cat(convs, axis=1)
-
-        # block2
-        for _, l in enumerate(self.block2):
-            x = l(x)
-
-        # block3
-        for _, l in enumerate(self.block3):
-            x = l(x)
-
-        return x # [batch_size, 16, 14, 14]
-
-    def map_features(self, local_maps: Tensor) -> Tensor:
-        device = self.dummy_param.get_device()
-        x = local_maps.to(self.device)
-
-        # block1
-        convs = []
-        for _, l in enumerate(self.block1):
-            convs.append(l(x))
-        x = torch.cat(convs, axis=1)
-
-        # block2
-        for _, l in enumerate(self.block2):
-            x = l(x)
-
-        # block3
-        convs = []
-        for _, l in enumerate(self.block3):
-            convs.append(l(x))
-        x = torch.cat(convs, axis=1)
-
-        # block4
-        for _, l in enumerate(self.block4):
-            x = l(x)
-
-        return x # [batch_size*num_particles, 8, 14, 14]
-
-    def get_local_maps(self, particle_states: Tensor, global_maps: Tensor) -> Tensor:
-        device = self.dummy_param.get_device()
-        batch_size, num_particles = particle_states.shape[:2]
-        total_samples = batch_size * num_particles
-        flat_states = torch.reshape(particle_states, (total_samples, 3))
-
-        zero = torch.full((total_samples, ), 0).to(device)
-        one = torch.full((total_samples, ), 1).to(device)
-
-        input_map_shape = global_maps.shape
-        # affine transformation
-        height_inverse = 1.0 / input_map_shape[2]
-        width_inverse = 1.0 / input_map_shape[3]
-
-        # 1. translate the global map s.t. the center is at the particle state
-        translate_x = (flat_states[:, 0] * width_inverse * 2.0) - 1.0
-        translate_y = (flat_states[:, 1] * height_inverse * 2.0) - 1.0
-        transm1 = torch.stack([one, zero, translate_x, zero, one, translate_y, zero, zero, one], axis=1)
-        transm1 = torch.reshape(transm1, (total_samples, 3, 3))
-
-        # 2. rotate the global map s.t. the oriantation matches the particle state
-        # normalize orientations
-        theta = normalize(flat_states[:, 2], isTensor=True)
-        costheta = torch.cos(theta)
-        sintheta = torch.sin(theta)
-        rotm = torch.stack([costheta, sintheta, zero, -sintheta, costheta, zero, zero, zero, one], axis=1)
-        rotm = torch.reshape(rotm, (total_samples, 3, 3))
-
-        # 3. optional scale down the map
-        window_scaler = 8
-        scale_x = torch.full((total_samples, ), float(self.params.local_map_size[0] * window_scaler) * width_inverse).to(device)
-        scale_y = torch.full((total_samples, ), float(self.params.local_map_size[1] * window_scaler) * height_inverse).to(device)
-        scalem = torch.stack([scale_x, zero, zero, zero, scale_y, zero, zero, zero, one], axis=1)
-        scalem = torch.reshape(scalem, (total_samples, 3, 3))
-
-        # # 4, optional translate the local map s.t. the particle defines the bottom mid-point instead of the center
-        # translate_y2 = torch.full((total_samples, ), -1.0)
-        # transm2 = torch.stack([one, zero, zero, zero, one, translate_y2, zero, zero, one], axis=1)
-        # transm2 = torch.reshape(transm2, (total_samples, 3, 3))
-
-        # chain the transormation matrices
-        transform_m = torch.matmul(transm1, rotm)   # translate and rotation
-        transform_m = torch.matmul(transform_m, scalem) # scale
-        # transform_m = torch.matmul(transform_m, transm2)
-
-        # reshape to the format expected by the spatial transform network
-        transform_m = torch.reshape(transform_m[:, :2], (batch_size * num_particles, 2, 3))
-        grid_size = torch.Size((batch_size * num_particles, input_map_shape[1], self.params.local_map_size[0], self.params.local_map_size[1]))
-        grid = F.affine_grid(transform_m, grid_size, align_corners=False).float()
-
-        output_list = []
-        # iterate over num_particles
-        for i in range(num_particles):
-            local_map = F.grid_sample(global_maps, grid[i*batch_size: (i+1)*batch_size, :, :, :], align_corners=False)
-            output_list.append(local_map)
-        local_maps = torch.stack(output_list, axis=1)
-
-        return local_maps # [batch_size, num_particles, 1, 28, 28]
-
-    def likelihoods(self, joint_features: Tensor) -> Tensor:
-        x = joint_features
-        total_samples = joint_features.shape[0]
-        output_size = (12, 12)
-
-        # block1
-        x1 = x
-        for _, l in enumerate(self.block1):
-            x1 = l(x1)
-
-        # block2
-        x2 = x
-        for _, l in enumerate(self.block2):
-            x2 = l(x2)
-
-        x = torch.cat([x1, x2], axis=1)
-
-        # block3
-        for _, l in enumerate(self.block3):
-            x = l(x)
-
-        # [batch_size*num_particles, 16, 5, 5]
-        x = torch.reshape(x, (total_samples, -1))
-
-        # block4
-        for _, l in enumerate(self.block4):
-            x = l(x)
-
-        return x # [batch_size*num_particles, 1]
 
 # reference https://discuss.pytorch.org/t/check-gradient-flow-in-network/15063/10
 def plot_grad_flow(named_parameters):
