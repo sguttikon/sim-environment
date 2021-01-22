@@ -18,28 +18,9 @@ class PFNet(object):
     def __init__(self, params):
         self.params = params
 
-        # data loader
-        composed = transforms.Compose([
-                    pf.ToTensor(),
-        ])
-        train_dataset = pf.House3DTrajDataset(params, params.train_file, transform=composed)
-        self.train_data_loader = DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
-
-        # define model
-        self.pf_cell = pf.PFCell(params)
-
-        if params.multiple_gpu:
-            self.pf_cell = torch.nn.DataParallel(self.pf_cell, device_ids=range(params.device_count), output_device=self.params.device)
-            self.params.batch_size //= self.params.device_count # data gets distributed amoung devices
-        self.pf_cell.to(params.device)
-
-        # define optimizer
-        model_params =  list(self.pf_cell.parameters())
-        self.optimizer = torch.optim.Adam(model_params, lr=2e-4, weight_decay=0.01)
-
         self.writer = SummaryWriter()
 
-    def run_episode(self, episode_batch):
+    def run_episode(self, model, episode_batch):
         trajlen = self.params.trajlen
 
         odometries = episode_batch['odometry']
@@ -61,7 +42,7 @@ class PFNet(object):
             odom = odometries[:, traj, :]
             inputs = obs, odom, global_maps
 
-            outputs, state = self.pf_cell(inputs, state)
+            outputs, state = model(inputs, state)
 
             t_particle_states.append(outputs[0].unsqueeze(1))
             t_particle_weights.append(outputs[1].unsqueeze(1))
@@ -74,16 +55,37 @@ class PFNet(object):
         return outputs
 
     def run_training(self):
+        trajlen = self.params.trajlen
         batch_size = self.params.batch_size
         num_particles = self.params.num_particles
+
+        # data loader
+        composed = transforms.Compose([
+                    pf.ToTensor(),
+        ])
+        train_dataset = pf.House3DTrajDataset(params, params.train_file, transform=composed)
+        train_loader = DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers, pin_memory=True)
+
+        # define model
+        model = pf.PFCell(params)
+
+        self.params.batch_size //= self.params.device_count
+        if params.multiple_gpu:
+            model = torch.nn.DataParallel(model, device_ids=range(torch.cuda.device_count()), output_device=self.params.device)
+        model.to(self.params.device)
+
+        # define optimizer
+        optimizer = torch.optim.Adam(model.parameters(), lr=2e-4, weight_decay=0.01)
+
+        print('dataloader initialized')
 
         # iterate over num_epochs
         for epoch in range(self.params.num_epochs):
             b_loss_total = []
             b_loss_coords = []
-            self.set_train_mode()
+            model.train()
             # iterate over num_batches
-            for batch_idx, batch_samples in enumerate(self.train_data_loader):
+            for batch_idx, batch_samples in enumerate(train_loader):
                 episode_batch = batch_samples
                 labels = episode_batch['true_states']
 
@@ -91,7 +93,7 @@ class PFNet(object):
                 if batch_size != labels.shape[0]:
                     break
 
-                outputs = self.run_episode(episode_batch)
+                outputs = self.run_episode(model, episode_batch)
 
                 # [batch_size, trajlen, [num_particles], ..]
                 losses = self.loss_fn(outputs[0], outputs[1], labels)
@@ -101,10 +103,10 @@ class PFNet(object):
                 # pf.plot_grad_flow(self.pf_cell.named_parameters())
 
                 # update parameters based on gradients
-                self.optimizer.step()
+                optimizer.step()
 
                 # cleat gradients
-                self.optimizer.zero_grad()
+                optimizer.zero_grad()
 
                 loss_total = losses['loss_total'].item()
                 loss_coords = losses['loss_coords'].item()
@@ -164,20 +166,15 @@ class PFNet(object):
 
         return losses
 
-    def set_train_mode(self):
-        self.pf_cell.train()
-
-    def set_eval_mode(self):
-        self.pf_cell.eval()
-
-    def save(self, file_name):
+    def save(self, model, file_name):
         torch.save({
-            'pf_cell': self.pf_cell.state_dict(),
+            'pf_cell': model.state_dict(),
         }, file_name)
 
-    def load(self, file_name):
+    def load(self, model, file_name):
         checkpoint = torch.load(file_name)
-        self.pf_cell.load_state_dict(checkpoint['pf_cell'])
+        model.load_state_dict(checkpoint['pf_cell'])
+        return model
 
     def test(self):
         file_name = 'saved_models/pfnet_eps_0.pth'

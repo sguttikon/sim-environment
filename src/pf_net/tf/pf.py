@@ -769,7 +769,7 @@ class PFCell(nn.Module):
 
         # observation update
         lik = self.observation_update(global_maps, particle_states, observation)
-        particle_weights += lik  # unnormalized
+        particle_weights = particle_weights + lik  # unnormalized
 
         # resample
         if self.params.resample:
