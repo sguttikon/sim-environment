@@ -53,17 +53,15 @@ class PFNet(object):
         return outputs
 
     def preprocess_data(self, batch_samples):
-        episode_batch = batch_samples
-        batch_size, num_particles = episode_batch['init_particles'].shape[:2]
-        episode_batch['init_particle_weights'] = torch.full((batch_size, num_particles), np.log(1.0/num_particles))
+        episode_batch = {}
 
-        if not self.params.use_cpu:
-            episode_batch['odometry'] = episode_batch['odometry'].cuda()
-            episode_batch['global_map'] = episode_batch['global_map'].cuda()
-            episode_batch['observation'] = episode_batch['observation'].cuda()
-            episode_batch['true_states'] = episode_batch['true_states'].cuda()
-            episode_batch['init_particles'] = episode_batch['init_particles'].cuda()
-            episode_batch['init_particle_weights'] = episode_batch['init_particle_weights'].cuda()
+        batch_size, num_particles = batch_samples['init_particles'].shape[:2]
+        episode_batch['init_particle_weights'] = torch.full((batch_size, num_particles), np.log(1.0/num_particles)).to(self.params.device)
+        episode_batch['init_particles'] = batch_samples['init_particles'].to(self.params.device)
+        episode_batch['true_states'] = batch_samples['true_states'].to(self.params.device)
+        episode_batch['observation'] = batch_samples['observation'].to(self.params.device)
+        episode_batch['global_map'] = batch_samples['global_map'].to(self.params.device)
+        episode_batch['odometry'] = batch_samples['odometry'].to(self.params.device)
 
         return episode_batch
 
@@ -81,17 +79,11 @@ class PFNet(object):
 
         # define model
         model = pf.PFCell(params)
-        if not self.params.use_cpu:
-            model.cuda()
 
+        self.params.batch_size //= self.params.device_count
         if params.multiple_gpu:
-            model.transition_model = torch.nn.DataParallel(model.transition_model)
-            model.trans_map_model = torch.nn.DataParallel(model.trans_map_model)
-            model.resample_model = torch.nn.DataParallel(model.resample_model)
-            model.observation_model = torch.nn.DataParallel(model.observation_model)
-            model.map_model = torch.nn.DataParallel(model.map_model)
-            model.likeli_net = torch.nn.DataParallel(model.likeli_net)
             model = torch.nn.DataParallel(model)
+        model.to(self.params.device)
 
         # define optimizer
         self.optimizer = torch.optim.Adam(model.parameters(), lr=2e-4, weight_decay=0.01)
