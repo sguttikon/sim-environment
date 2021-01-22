@@ -129,7 +129,7 @@ class PFNet(object):
 
             # save
             file_name = 'saved_models/' + 'pfnet_eps_{0:05d}.pth'.format(epoch)
-            self.save(file_name)
+            self.save(model, file_name)
 
         print('training finished')
 
