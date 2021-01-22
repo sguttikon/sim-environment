@@ -298,8 +298,12 @@ class TransitionModel(nn.Module):
         super(TransitionModel, self).__init__()
         self.params = params
 
+        # to determine device dynamically
+        self.dummy_param = nn.Parameter(torch.empty(0))
+
     def forward(self, particle_states: Tensor, odometry: Tensor) -> Tensor:
-        device = particle_states.get_device()
+        device = self.dummy_param.get_device()
+
         translation_std = self.params.transition_std[0] / self.params.map_pixel_in_meters  # in pixels
         rotation_std = self.params.transition_std[1]  # in radians
 
@@ -355,8 +359,12 @@ class ObservationModel(nn.Module):
         ]
         self.block3 = nn.ModuleList(block3_layers)
 
+        # to determine device dynamically
+        self.dummy_param = nn.Parameter(torch.empty(0))
+
     def forward(self, observation: Tensor) -> Tensor:
-        x = observation
+        device = self.dummy_param.get_device()
+        x = observation.to(device)
 
         # block1
         convs = []
@@ -434,8 +442,12 @@ class MapModel(nn.Module):
         ]
         self.block4 = nn.ModuleList(block4_layers)
 
+        # to determine device dynamically
+        self.dummy_param = nn.Parameter(torch.empty(0))
+
     def forward(self, local_maps: Tensor) -> Tensor:
-        x = local_maps
+        device = self.dummy_param.get_device()
+        x = local_maps.to(device)
 
         # block1
         convs = []
@@ -504,14 +516,16 @@ class LikelihoodNet(nn.Module):
         output_size = (12, 12)
 
         block1_layers= [
-            LocallyConnected2d(24, 8, output_size, kernel_size=3, stride=1, bias=True),
+            # LocallyConnected2d(24, 8, output_size, kernel_size=3, stride=1, bias=True),
+            nn.Conv2d(24, 8, kernel_size=3, stride=1, padding=0, dilation=1, bias=True),
             nn.ReLU()
         ]
         self.block1 = nn.ModuleList(block1_layers)
 
         block2_layers= [
-            nn.ZeroPad2d((1, 1, 1, 1)),
-            LocallyConnected2d(24, 8, output_size, kernel_size=5, stride=1, bias=True),
+            # nn.ZeroPad2d((1, 1, 1, 1)),
+            # LocallyConnected2d(24, 8, output_size, kernel_size=5, stride=1, bias=True),
+            nn.Conv2d(24, 8, kernel_size=5, stride=1, padding=1, dilation=1, bias=True),
             nn.ReLU()
         ]
         self.block2 = nn.ModuleList(block2_layers)
@@ -527,9 +541,13 @@ class LikelihoodNet(nn.Module):
         ]
         self.block4 = nn.ModuleList(block4_layers)
 
+        # to determine device dynamically
+        self.dummy_param = nn.Parameter(torch.empty(0))
 
     def forward(self, joint_features: Tensor) -> Tensor:
-        x = joint_features
+        device = self.dummy_param.get_device()
+        x = joint_features.to(device)
+
         total_samples = joint_features.shape[0]
         output_size = (12, 12)
 
@@ -619,8 +637,11 @@ class SpatialTransformerNet(nn.Module):
         super(SpatialTransformerNet, self).__init__()
         self.params = params
 
+        # to determine device dynamically
+        self.dummy_param = nn.Parameter(torch.empty(0))
+
     def forward(self, particle_states: Tensor, global_maps: Tensor) -> Tensor:
-        device = particle_states.get_device()
+        device = self.dummy_param.get_device()
 
         batch_size, num_particles = particle_states.shape[:2]
         total_samples = batch_size * num_particles
@@ -685,11 +706,14 @@ class ResampleNet(nn.Module):
         super(ResampleNet, self).__init__()
         self.params = params
 
+        # to determine device dynamically
+        self.dummy_param = nn.Parameter(torch.empty(0))
+
     def forward(self, particle_states: Tensor, particle_weights: Tensor, alpha: int) -> Tensor:
+        device = self.dummy_param.get_device()
 
         assert 0.0 < alpha <= 1.0
         batch_size, num_particles = particle_states.shape[:2]
-        device = particle_states.get_device()
 
         # normalize
         particle_weights = particle_weights - torch.logsumexp(particle_weights, dim=-1, keepdim=True)
@@ -768,6 +792,7 @@ class PFCell(nn.Module):
     def forward(self, inputs, state):
         particle_states, particle_weights = state
         observation, odometry, global_maps = inputs
+        device = self.dummy_param.get_device()
 
         # sanity check
         batch_size, num_particles = particle_states.shape[:2]
@@ -777,11 +802,11 @@ class PFCell(nn.Module):
         assert list(observation.shape) == [batch_size, 3, 56, 56]
         assert list(odometry.shape) == [batch_size, 3]
 
-        particle_states = particle_states.to(self.params.device)
-        particle_weights = particle_weights.to(self.params.device)
-        observation = observation.to(self.params.device)
-        odometry = odometry.to(self.params.device)
-        global_maps = global_maps.to(self.params.device)
+        particle_states = particle_states.to(device)
+        particle_weights = particle_weights.to(device)
+        observation = observation.to(device)
+        odometry = odometry.to(device)
+        global_maps = global_maps.to(device)
 
         # observation update
         lik = self.observation_update(global_maps, particle_states, observation)
