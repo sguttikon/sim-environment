@@ -434,7 +434,11 @@ class MapModel(nn.Module):
         self.block4 = nn.ModuleList(block4_layers)
 
     def forward(self, particle_states: Tensor, global_maps: Tensor) -> Tensor:
-        x = get_local_maps(particle_states, global_maps)
+        batch_size, num_particles = particle_states.shape[:2]
+        local_maps = self.get_local_maps(particle_states, global_maps)
+
+        # flatten batch and particle dimensions
+        x = torch.reshape(local_maps, [batch_size * num_particles] + list(local_maps.shape[2:]))
 
         # block1
         convs = []
@@ -810,15 +814,14 @@ class PFCell(nn.Module):
 
         self.params = params
 
-        self.trans_map_model = SpatialTransformerNet(params)
         self.map_model = MapModel(params)
+        # self.trans_map_model = SpatialTransformerNet(params)
         # self.transition_model = TransitionModel(params)
         # self.resample_model = ResampleNet(params)
         # self.observation_model = ObservationModel()
         # self.likeli_net = LikelihoodNet()
 
         if params.multiple_gpu:
-            self.trans_map_model = torch.nn.DataParallel(self.map_model)
             self.map_model = torch.nn.DataParallel(self.map_model)
 
     def forward(self, inputs, state):
@@ -839,11 +842,7 @@ class PFCell(nn.Module):
         odometry = odometry.to(self.params.device)
         global_maps = global_maps.to(self.params.device)
 
-        local_maps = self.trans_map_model(particle_states, global_maps)
-
-        # flatten batch and particle dimensions
-        local_maps = torch.reshape(local_maps, [batch_size * num_particles] + list(local_maps.shape[2:]))
-        map_features = self.map_model(local_maps)
+        map_features = self.map_model(particle_states, global_maps)
 
         # # observation update
         # lik = self.observation_update(global_maps, particle_states, observation)
