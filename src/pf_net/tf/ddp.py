@@ -128,30 +128,37 @@ def run_training(rank, params):
             # cleat gradients
             optimizer.zero_grad()
 
-            loss_total = losses['loss_total'].item()
-            loss_coords = losses['loss_coords'].item()
+            # log per epoch batch stats (only for gpu:0 or cpu)
+            if rank == torch.device('cpu') or rank == 0:
+                loss_total = losses['loss_total'].item()
+                loss_coords = losses['loss_coords'].item()
 
-            b_loss_total.append(loss_total)
-            b_loss_coords.append(loss_coords)
+                b_loss_total.append(loss_total)
+                b_loss_coords.append(loss_coords)
 
-            # log per epoch batch stats
-            print('epoch: {0:05d}, batch: {1:05d}, b_loss_coords: {2:03.3f}, b_loss_total: {3:03.3f}'.format(epoch, batch_idx, loss_coords, loss_total))
-            writer.add_scalars('epoch-{0:03d}_train_stats'.format(epoch), {
-                'b_total_loss': loss_total,
-                'b_coords_loss': loss_coords
-            }, batch_idx)
+                print('epoch: {0:05d}, batch: {1:05d}, b_loss_coords: {2:03.3f}, b_loss_total: {3:03.3f}'.format(epoch, batch_idx, loss_coords, loss_total))
+                writer.add_scalars('epoch-{0:03d}_train_stats'.format(epoch), {
+                    'b_total_loss': loss_total,
+                    'b_coords_loss': loss_coords
+                }, batch_idx)
 
-        # log per epoch mean stats
-        print('epoch: {0:05d}, mean_loss_coords: {1:03.3f}, mean_loss_total: {2:03.3f}'.format(epoch, np.mean(b_loss_coords), np.mean(b_loss_total)))
-        writer.add_scalars('train_stats', {
-                'mean_total_loss': np.mean(b_loss_total),
-                'mean_coords_loss': np.mean(b_loss_coords)
-        }, epoch)
+            if batch_idx == 1:
+                break
 
-        # save
+        # log per epoch mean stats (only for gpu:0 or cpu)
+        if rank == torch.device('cpu') or rank == 0:
+            print('epoch: {0:05d}, mean_loss_coords: {1:03.3f}, mean_loss_total: {2:03.3f}'.format(epoch, np.mean(b_loss_coords), np.mean(b_loss_total)))
+            writer.add_scalars('train_stats', {
+                    'mean_total_loss': np.mean(b_loss_total),
+                    'mean_coords_loss': np.mean(b_loss_coords)
+            }, epoch)
+
+        # save (only for gpu:0 or cpu)
         file_name = 'saved_models/' + 'pfnet_eps_{0:05d}.pth'.format(epoch)
-        save(model, file_name)
-
+        if rank == torch.device('cpu'):
+            save(model, file_name)
+        elif rank == 0:
+            save(model.module, file_name)
     cleanup()
 
     print('training finished')
@@ -197,6 +204,7 @@ def save(model, file_name):
 def load(model, file_name):
     checkpoint = torch.load(file_name)
     model.load_state_dict(checkpoint['pf_cell'])
+    return model
 
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
