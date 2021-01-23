@@ -230,6 +230,7 @@ if __name__ == '__main__':
     argparser.add_argument('--batch_size', type=int, default=4, help='batch size used for training')
     argparser.add_argument('--num_workers', type=int, default=0, help='workers used for data loading')
     argparser.add_argument('--num_particles', type=int, default=30, help='number of particles used for training')
+    argparser.add_argument('--trajlen', type=int, default=24, help='trajectory length to train [max 100]')
     argparser.add_argument('--transition_std', nargs='*', default=['0.0', '0.0'], help='std for motion model, translation std (meters), rotatation std (radians)')
     argparser.add_argument('--local_map_size', nargs='*', default=(28, 28), help='shape of local map')
     argparser.add_argument('--n_gpu', type=int, default=-1, help='number of gpus to train')
@@ -239,7 +240,6 @@ if __name__ == '__main__':
 
     params = argparser.parse_args()
 
-    params.trajlen = 24
     params.map_pixel_in_meters = 0.02
     params.init_particles_distr = 'gaussian'
     params.init_particles_std = ['0.3', '0.523599']  # 30cm, 30degrees

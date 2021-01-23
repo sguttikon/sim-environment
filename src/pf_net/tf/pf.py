@@ -22,9 +22,6 @@ valid_data_size = 830
 
 np.set_printoptions(precision=5, suppress=True)
 
-fig = plt.figure(figsize=(7, 7))
-plt_ax = fig.add_subplot(111)
-
 class House3DTrajDataset(Dataset):
 
     def __init__(self, params, file, transform=None):
@@ -955,6 +952,9 @@ if __name__ == '__main__':
     trans_map_model = SpatialTransformerNet(params)
     map_model = MapModel()
     likeli_net = LikelihoodNet()
+
+    fig = plt.figure(figsize=(7, 7))
+    plt_ax = fig.add_subplot(111)
 
     for _, batch_samples in enumerate(house_data_loader):
         # print(
