@@ -200,6 +200,7 @@ if __name__ == '__main__':
     argparser.add_argument('--use_cpu', type=str2bool, nargs='?', const=True, default=False, help='cpu training')
     argparser.add_argument('--use_lfc', type=str2bool, nargs='?', const=True, default=False, help='use LocallyConnected2d')
     argparser.add_argument('--multiple_gpu', type=str2bool, nargs='?', const=True, default=False, help='use multiple gpu for training')
+    argparser.add_argument('--dataparallel', type=str2bool, nargs='?', const=True, default=False, help='get parallel data training')
     argparser.add_argument('--seed', type=int, default=42, help='random seed')
 
     params = argparser.parse_args()
