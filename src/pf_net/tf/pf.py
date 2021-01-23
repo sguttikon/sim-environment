@@ -298,11 +298,7 @@ class TransitionModel(nn.Module):
         super(TransitionModel, self).__init__()
         self.params = params
 
-        # to determine device dynamically
-        self.dummy_param = nn.Parameter(torch.empty(0))
-
     def forward(self, particle_states: Tensor, odometry: Tensor) -> Tensor:
-        device = self.dummy_param.get_device()
 
         translation_std = self.params.transition_std[0] / self.params.map_pixel_in_meters  # in pixels
         rotation_std = self.params.transition_std[1]  # in radians
@@ -312,7 +308,7 @@ class TransitionModel(nn.Module):
         odometry = odometry.unsqueeze(1)
         odom_x, odom_y, odom_th = torch.unbind(odometry, dim=-1)
 
-        noise_th = torch.normal(mean=0.0, std=1.0, size=part_th.shape).to(device) * rotation_std
+        noise_th = torch.normal(mean=0.0, std=1.0, size=part_th.shape).to(self.params.rank) * rotation_std
 
         # add orientation noise before translation
         part_th = part_th + noise_th
@@ -323,8 +319,8 @@ class TransitionModel(nn.Module):
         delta_y = sin_th * odom_x + cos_th * odom_y
         delta_th = odom_th
 
-        delta_x = delta_x + torch.normal(mean=0.0, std=1.0, size=delta_x.shape).to(device) * translation_std
-        delta_y = delta_y + torch.normal(mean=0.0, std=1.0, size=delta_y.shape).to(device) * translation_std
+        delta_x = delta_x + torch.normal(mean=0.0, std=1.0, size=delta_x.shape).to(self.params.rank) * translation_std
+        delta_y = delta_y + torch.normal(mean=0.0, std=1.0, size=delta_y.shape).to(self.params.rank) * translation_std
 
         return torch.stack([part_x + delta_x, part_y + delta_y, part_th + delta_th], axis=-1)
 
@@ -359,12 +355,8 @@ class ObservationModel(nn.Module):
         ]
         self.block3 = nn.ModuleList(block3_layers)
 
-        # to determine device dynamically
-        self.dummy_param = nn.Parameter(torch.empty(0))
-
     def forward(self, observation: Tensor) -> Tensor:
-        device = self.dummy_param.get_device()
-        x = observation.to(device)
+        x = observation
 
         # block1
         convs = []
@@ -442,12 +434,8 @@ class MapModel(nn.Module):
         ]
         self.block4 = nn.ModuleList(block4_layers)
 
-        # to determine device dynamically
-        self.dummy_param = nn.Parameter(torch.empty(0))
-
     def forward(self, local_maps: Tensor) -> Tensor:
-        device = self.dummy_param.get_device()
-        x = local_maps.to(device)
+        x = local_maps
 
         # block1
         convs = []
@@ -551,12 +539,8 @@ class LikelihoodNet(nn.Module):
         ]
         self.block4 = nn.ModuleList(block4_layers)
 
-        # to determine device dynamically
-        self.dummy_param = nn.Parameter(torch.empty(0))
-
     def forward(self, joint_features: Tensor) -> Tensor:
-        device = self.dummy_param.get_device()
-        x = joint_features.to(device)
+        x = joint_features
 
         total_samples = joint_features.shape[0]
         output_size = (12, 12)
@@ -645,18 +629,14 @@ class SpatialTransformerNet(nn.Module):
         super(SpatialTransformerNet, self).__init__()
         self.params = params
 
-        # to determine device dynamically
-        self.dummy_param = nn.Parameter(torch.empty(0))
-
     def forward(self, particle_states: Tensor, global_maps: Tensor) -> Tensor:
-        device = self.dummy_param.get_device()
 
         batch_size, num_particles = particle_states.shape[:2]
         total_samples = batch_size * num_particles
         flat_states = torch.reshape(particle_states, (total_samples, 3))
 
-        zero = torch.full((total_samples, ), 0).to(device)
-        one = torch.full((total_samples, ), 1).to(device)
+        zero = torch.full((total_samples, ), 0).to(self.params.rank)
+        one = torch.full((total_samples, ), 1).to(self.params.rank)
 
         input_map_shape = global_maps.shape
         # affine transformation
@@ -679,8 +659,8 @@ class SpatialTransformerNet(nn.Module):
 
         # 3. optional scale down the map
         window_scaler = 8
-        scale_x = torch.full((total_samples, ), float(self.params.local_map_size[0] * window_scaler) * width_inverse).to(device)
-        scale_y = torch.full((total_samples, ), float(self.params.local_map_size[1] * window_scaler) * height_inverse).to(device)
+        scale_x = torch.full((total_samples, ), float(self.params.local_map_size[0] * window_scaler) * width_inverse).to(self.params.rank)
+        scale_y = torch.full((total_samples, ), float(self.params.local_map_size[1] * window_scaler) * height_inverse).to(self.params.rank)
         scalem = torch.stack([scale_x, zero, zero, zero, scale_y, zero, zero, zero, one], axis=1)
         scalem = torch.reshape(scalem, (total_samples, 3, 3))
 
@@ -739,7 +719,7 @@ class ResampleNet(nn.Module):
         particle_weights = particle_weights - torch.logsumexp(particle_weights, dim=-1, keepdim=True)
 
         # construct uniform weights
-        uniform_weights = torch.full((batch_size, num_particles), np.log(1.0/float(num_particles))).to(device)
+        uniform_weights = torch.full((batch_size, num_particles), np.log(1.0/float(num_particles))).to(self.params.rank)
 
         # build sampling distribution q(s) and update particle weights
         if alpha < 1.0:
@@ -763,7 +743,7 @@ class ResampleNet(nn.Module):
         indices = torch.cat(idx, dim=-1)    #   [batch_size, num_particles]
 
         # index into particles
-        helper = torch.arange(0, batch_size * num_particles, step=num_particles, dtype=torch.int64).to(device) # [batch_size]
+        helper = torch.arange(0, batch_size * num_particles, step=num_particles, dtype=torch.int64).to(self.params.rank) # [batch_size]
         indices = indices + helper.unsqueeze(1)
 
         indices = torch.reshape(indices, (batch_size * num_particles, ))
@@ -806,27 +786,9 @@ class PFCell(nn.Module):
         self.map_model = MapModel(params)
         self.likeli_net = LikelihoodNet(params)
 
-        # to determine device dynamically
-        self.dummy_param = nn.Parameter(torch.empty(0))
-
     def forward(self, inputs, state):
         particle_states, particle_weights = state
         observation, odometry, global_maps = inputs
-        device = self.dummy_param.get_device()
-
-        # sanity check
-        batch_size, num_particles = particle_states.shape[:2]
-        assert list(particle_states.shape) == [batch_size, num_particles, 3]
-        assert list(particle_weights.shape) == [batch_size, num_particles]
-        assert list(global_maps.shape) == [batch_size, 1, 3000, 3000]
-        assert list(observation.shape) == [batch_size, 3, 56, 56]
-        assert list(odometry.shape) == [batch_size, 3]
-
-        particle_states = particle_states.to(device)
-        particle_weights = particle_weights.to(device)
-        observation = observation.to(device)
-        odometry = odometry.to(device)
-        global_maps = global_maps.to(device)
 
         # observation update
         lik = self.observation_update(global_maps, particle_states, observation)
