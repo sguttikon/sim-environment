@@ -5,11 +5,14 @@ from matplotlib.patches import Wedge
 from matplotlib.patches import Arrow
 from torchvision import transforms
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 import numpy as np
 import argparse
 import random
 import torch
 import pf
+
+np.set_printoptions(precision=3, suppress=True)
 
 def load(model, file_name):
     checkpoint = torch.load(file_name)
@@ -37,6 +40,16 @@ def draw_robot(robot_plt, robot_state, clr):
     robot_plt['heading'] = Arrow(x, y, dx, dy, width=10, fc=clr, alpha=.8)
     plt_ax.add_artist(robot_plt['heading'])    # newpose
 
+    return robot_plt
+
+def draw_particles(robot_plt, particles, particle_weights):
+    colors = cm.rainbow(particle_weights)
+    positions = particles[:, 0:2]
+    if 'particles' not in robot_plt:
+        robot_plt['particles'] = plt.scatter(positions[:, 0], positions[:, 1], s=10, c=colors, alpha=.75)
+    else:
+        robot_plt['particles'].set_offsets(positions[:, 0:2])
+        robot_plt['particles'].set_color(colors)
     return robot_plt
 
 def visualize(params):
@@ -98,6 +111,11 @@ def visualize(params):
         est_plt = draw_robot(est_plt, est_state, '#78097e')
         # print(np.linalg.norm(gt_state-est_state))
 
+        # plot est pose particles
+        particles = output[0][0].detach().cpu().numpy()
+        particle_weights = lin_weights[0].detach().cpu().numpy()
+        draw_particles(est_plt, particles, particle_weights)
+
 
     t_particle_states = torch.cat(t_particle_states, axis=1)
     t_particle_weights = torch.cat(t_particle_weights, axis=1)
@@ -105,7 +123,11 @@ def visualize(params):
     outputs = t_particle_states, t_particle_weights
 
     loss = loss_fn(outputs[0], outputs[1], true_states, params)
-    print(loss)
+    print(f'loss coords: {loss["loss_coords"].data} and total loss: {loss["loss_total"].data}')
+
+    gt_state[:2] *= params.map_pixel_in_meters
+    est_state[:2] *= params.map_pixel_in_meters
+    print(f'gt pose:  {gt_state}\nest pose: {est_state} in (mts, radians)')
 
     return outputs
 
