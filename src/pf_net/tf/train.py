@@ -198,6 +198,7 @@ if __name__ == '__main__':
     argparser.add_argument('--transition_std', nargs='*', default=['0.0', '0.0'], help='std for motion model, translation std (meters), rotatation std (radians)')
     argparser.add_argument('--local_map_size', nargs='*', default=(28, 28), help='shape of local map')
     argparser.add_argument('--use_cpu', type=str2bool, nargs='?', const=True, default=False, help='cpu training')
+    argparser.add_argument('--use_lfc', type=str2bool, nargs='?', const=True, default=False, help='use LocallyConnected2d')
     argparser.add_argument('--multiple_gpu', type=str2bool, nargs='?', const=True, default=False, help='use multiple gpu for training')
     argparser.add_argument('--seed', type=int, default=42, help='random seed')
 

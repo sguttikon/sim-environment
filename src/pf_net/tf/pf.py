@@ -515,19 +515,29 @@ class LikelihoodNet(nn.Module):
 
         output_size = (12, 12)
 
-        block1_layers= [
-            # LocallyConnected2d(24, 8, output_size, kernel_size=3, stride=1, bias=True),
-            nn.Conv2d(24, 8, kernel_size=3, stride=1, padding=0, dilation=1, bias=True),
-            nn.ReLU()
-        ]
+        if params.use_lfc:
+            block1_layers= [
+                LocallyConnected2d(24, 8, output_size, kernel_size=3, stride=1, bias=True),
+                nn.ReLU()
+            ]
+        else:
+            block1_layers= [
+                    nn.Conv2d(24, 8, kernel_size=3, stride=1, padding=0, dilation=1, bias=True),
+                nn.ReLU()
+            ]
         self.block1 = nn.ModuleList(block1_layers)
 
-        block2_layers= [
-            # nn.ZeroPad2d((1, 1, 1, 1)),
-            # LocallyConnected2d(24, 8, output_size, kernel_size=5, stride=1, bias=True),
-            nn.Conv2d(24, 8, kernel_size=5, stride=1, padding=1, dilation=1, bias=True),
-            nn.ReLU()
-        ]
+        if params.use_lfc:
+            block2_layers= [
+                nn.ZeroPad2d((1, 1, 1, 1)),
+                LocallyConnected2d(24, 8, output_size, kernel_size=5, stride=1, bias=True),
+                nn.ReLU()
+            ]
+        else:
+            block2_layers= [
+                nn.Conv2d(24, 8, kernel_size=5, stride=1, padding=1, dilation=1, bias=True),
+                nn.ReLU()
+            ]
         self.block2 = nn.ModuleList(block2_layers)
 
         block3_layers= [
