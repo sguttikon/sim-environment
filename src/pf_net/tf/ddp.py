@@ -142,9 +142,6 @@ def run_training(rank, params):
                     'b_coords_loss': loss_coords
                 }, batch_idx)
 
-            if batch_idx == 1:
-                break
-
         # log per epoch mean stats (only for gpu:0 or cpu)
         if rank == torch.device('cpu') or rank == 0:
             print('epoch: {0:05d}, mean_loss_coords: {1:03.3f}, mean_loss_total: {2:03.3f}'.format(epoch, np.mean(b_loss_coords), np.mean(b_loss_total)))
@@ -237,6 +234,7 @@ if __name__ == '__main__':
     argparser.add_argument('--local_map_size', nargs='*', default=(28, 28), help='shape of local map')
     argparser.add_argument('--n_gpu', type=int, default=-1, help='number of gpus to train')
     argparser.add_argument('--use_lfc', type=str2bool, nargs='?', const=True, default=False, help='use LocallyConnected2d')
+    argparser.add_argument('--dataparallel', type=str2bool, nargs='?', const=True, default=False, help='cpu training')
     argparser.add_argument('--seed', type=int, default=42, help='random seed')
 
     params = argparser.parse_args()
