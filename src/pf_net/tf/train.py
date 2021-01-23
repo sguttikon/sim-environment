@@ -63,18 +63,19 @@ class PFNet(object):
                     pf.ToTensor(),
         ])
         train_dataset = pf.House3DTrajDataset(params, params.train_file, transform=composed)
-        train_loader = DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers, pin_memory=True)
+        train_loader = DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
 
         # define model
-        model = pf.PFCell(params)
+        model = pf.PFCell(params).to(self.params.device)
 
+        # define optimizer
+        model_params =  list(model.parameters())
+        optimizer = torch.optim.Adam(model_params, lr=2e-4, weight_decay=0.01)
+
+        # define data parallel for multiple gpu support
         self.params.batch_size //= self.params.device_count
         if params.multiple_gpu:
             model = torch.nn.DataParallel(model, device_ids=range(self.params.device_count), output_device=self.params.device)
-        model.to(self.params.device)
-
-        # define optimizer
-        optimizer = torch.optim.Adam(model.parameters(), lr=2e-4, weight_decay=0.01)
 
         print('dataloader initialized')
 
@@ -209,7 +210,7 @@ if __name__ == '__main__':
     params.device_count = 1
     if not params.use_cpu and torch.cuda.is_available():
         os.environ['CUDA_VISIBLE_DEVICES'] = ','.join([str(elem) for elem in range(torch.cuda.device_count())])
-        params.device = torch.device('cuda:0')
+        params.device = torch.device('cuda')
         print('GPU detected: ', os.environ['CUDA_VISIBLE_DEVICES'])
         params.device_count = torch.cuda.device_count()
     else:

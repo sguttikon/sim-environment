@@ -323,10 +323,10 @@ class TransitionModel(nn.Module):
         delta_y = sin_th * odom_x + cos_th * odom_y
         delta_th = odom_th
 
-        noise_x = torch.normal(mean=0.0, std=1.0, size=delta_x.shape).to(device) * translation_std
-        noise_y = torch.normal(mean=0.0, std=1.0, size=delta_y.shape).to(device) * translation_std
+        delta_x = delta_x + torch.normal(mean=0.0, std=1.0, size=delta_x.shape).to(device) * translation_std
+        delta_y = delta_y + torch.normal(mean=0.0, std=1.0, size=delta_y.shape).to(device) * translation_std
 
-        return torch.stack([part_x + delta_x + noise_x, part_y + delta_y + noise_y, part_th + delta_th], axis=-1)
+        return torch.stack([part_x + delta_x, part_y + delta_y, part_th + delta_th], axis=-1)
 
 class ObservationModel(nn.Module):
 
@@ -574,8 +574,6 @@ class LikelihoodNet(nn.Module):
         for _, l in enumerate(self.block4):
             x = l(x)
 
-        lik = x
-
         # x = joint_features.cpu().detach().numpy()
         # x = np.transpose(x, (0, 2, 3, 1))
         # x = tf.convert_to_tensor(x)
@@ -599,7 +597,7 @@ class LikelihoodNet(nn.Module):
         #         1, activation=None, use_bias=True)(x)
         # print(lik.shape)
 
-        return lik # [batch_size*num_particles, 1]
+        return x # [batch_size*num_particles, 1]
 
 # reference: https://discuss.pytorch.org/t/locally-connected-layers/26979/2
 from torch.nn.modules.utils import _pair
@@ -686,15 +684,27 @@ class SpatialTransformerNet(nn.Module):
         transform_m = torch.matmul(transform_m, scalem) # scale
         # transform_m = torch.matmul(transform_m, transm2)
 
+        # # reshape to the format expected by the spatial transform network
+        # transform_m = torch.reshape(transform_m[:, :2], (batch_size * num_particles, 2, 3))
+        # grid_size = torch.Size((batch_size * num_particles, input_map_shape[1], self.params.local_map_size[0], self.params.local_map_size[1]))
+        # grid = F.affine_grid(transform_m, grid_size, align_corners=False).float()
+        #
+        # output_list = []
+        # # iterate over num_particles
+        # for i in range(num_particles):
+        #     local_map = F.grid_sample(global_maps, grid[i*batch_size: (i+1)*batch_size, :, :, :], align_corners=False)
+        #     output_list.append(local_map)
+        # local_maps = torch.stack(output_list, axis=1)
+
         # reshape to the format expected by the spatial transform network
-        transform_m = torch.reshape(transform_m[:, :2], (batch_size * num_particles, 2, 3))
-        grid_size = torch.Size((batch_size * num_particles, input_map_shape[1], self.params.local_map_size[0], self.params.local_map_size[1]))
-        grid = F.affine_grid(transform_m, grid_size, align_corners=False).float()
+        transform_m = torch.reshape(transform_m[:, :2], (batch_size, num_particles, 2, 3))
 
         output_list = []
         # iterate over num_particles
         for i in range(num_particles):
-            local_map = F.grid_sample(global_maps, grid[i*batch_size: (i+1)*batch_size, :, :, :], align_corners=False)
+            grid_size = torch.Size((batch_size, input_map_shape[1], self.params.local_map_size[0], self.params.local_map_size[1]))
+            grid = F.affine_grid(transform_m[:, i], grid_size, align_corners=False).float()
+            local_map = F.grid_sample(global_maps, grid, align_corners=False)
             output_list.append(local_map)
         local_maps = torch.stack(output_list, axis=1)
 
