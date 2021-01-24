@@ -25,29 +25,19 @@ def run_episode(model, episode_batch):
     odometries = episode_batch['odometry']
     global_maps = episode_batch['global_map']
     observations = episode_batch['observation']
-    init_particle_states = episode_batch['init_particles']
-    init_particle_weights = episode_batch['init_particle_weights']
+    particle_states = episode_batch['particle_states']
+    particle_weights = episode_batch['particle_weights']
 
-    trajlen = observations.shape[1]
-    batch_size, num_particles = init_particle_states.shape[:2]
-
-    # sanity check
-    assert list(init_particle_states.shape) == [batch_size, num_particles, 3]
-    assert list(init_particle_weights.shape) == [batch_size, num_particles]
-    assert list(global_maps.shape) == [batch_size, 1, 3000, 3000]
-    assert list(observations.shape) == [batch_size, trajlen, 3, 56, 56]
-    assert list(odometries.shape) == [batch_size, trajlen, 3]
-
-    # start with episode trajectory state with init particles and weights
-    state = init_particle_states, init_particle_weights
+    state = particle_states, particle_weights
 
     t_particle_states = []
     t_particle_weights = []
 
-    # iterate over trajectory_length
-    for traj in range(trajlen):
-        obs = observations[:, traj, :, :, :]
-        odom = odometries[:, traj, :]
+    # iterate over shoter segment_length
+    seglen = observations.shape[1]
+    for seg in range(seglen):
+        obs = observations[:, seg, :, :, :]
+        odom = odometries[:, seg, :]
         inputs = obs, odom, global_maps
 
         outputs, state = model(inputs, state)
@@ -58,9 +48,10 @@ def run_episode(model, episode_batch):
     t_particle_states = torch.cat(t_particle_states, axis=1)
     t_particle_weights = torch.cat(t_particle_weights, axis=1)
 
-    outputs = t_particle_states, t_particle_weights
+    eps_outputs = t_particle_states, t_particle_weights
+    eps_state = state
 
-    return outputs
+    return eps_outputs, eps_state
 
 def run_training(rank, params):
     print(f"Running basic DDP example on rank {rank}.")
@@ -94,6 +85,9 @@ def run_training(rank, params):
     # train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset,num_replicas=config.world_size)
     # train_dataloader = DataLoader(train_dataset, batch_size=config.BATCH_SIZE,sampler=train_sampler, shuffle=False)
 
+    trajlen, seglen = params.trajlen, params.seglen
+    assert trajlen % seglen == 0
+    num_segments = trajlen // seglen
     # iterate over num_train_epochs
     for epoch in range(params.num_train_epochs):
         b_loss_total = []
@@ -101,53 +95,76 @@ def run_training(rank, params):
         model.train()
         # iterate over num_batches
         for batch_idx, batch_samples in enumerate(train_loader):
+            batch_samples['true_states'] = batch_samples['true_states'].to(params.rank)
+            batch_samples['odometry'] = batch_samples['odometry'].to(params.rank)
+            batch_samples['global_map'] = batch_samples['global_map'].to(params.rank)
+            batch_samples['observation'] = batch_samples['observation'].to(params.rank)
+
+            batch_size, num_particles = batch_samples['init_particles'].shape[:2]
+            batch_samples['init_particles'] = batch_samples['init_particles'].to(params.rank)
+            batch_samples['init_particle_weights'] = torch.full((batch_size, num_particles), np.log(1.0/num_particles)).to(params.rank)
+
+            # sanity check
+            assert list(batch_samples['true_states'].shape)[1:] == [trajlen, 3]
+            assert list(batch_samples['odometry'].shape)[1:] == [trajlen, 3]
+            assert list(batch_samples['global_map'].shape)[1:] == [1, 3000, 3000]
+            assert list(batch_samples['observation'].shape)[1:] == [trajlen, 3, 56, 56]
+            assert list(batch_samples['init_particles'].shape)[1:] == [num_particles, 3]
+            assert list(batch_samples['init_particle_weights'].shape)[1:] == [num_particles]
+
+            # traj loss is sum of multiple seg loss
+            t_loss_total = 0
+            t_loss_coords = 0
+
+            # start each episode trajectory with init particles and weights state
             episode_batch = {}
-            episode_batch['true_states'] = batch_samples['true_states'].to(params.rank)
-            episode_batch['odometry'] = batch_samples['odometry'].to(params.rank)
-            episode_batch['global_map'] = batch_samples['global_map'].to(params.rank)
-            episode_batch['observation'] = batch_samples['observation'].to(params.rank)
-            episode_batch['init_particles'] = batch_samples['init_particles'].to(params.rank)
+            episode_batch['particle_states'] = batch_samples['init_particles']
+            episode_batch['particle_weights'] = batch_samples['init_particle_weights']
+            episode_batch['global_map'] = batch_samples['global_map']
+            # iterate over shorter segments
+            for i in range(num_segments):
+                # use latest inputs per segment
+                episode_batch['odometry'] = batch_samples['odometry'][:, i*seglen : (i+1)*seglen, :]
+                episode_batch['observation'] = batch_samples['observation'][:, i*seglen : (i+1)*seglen, :]
 
-            batch_size, num_particles = episode_batch['init_particles'].shape[:2]
-            episode_batch['init_particle_weights'] = torch.full((batch_size, num_particles), np.log(1.0/num_particles)).to(params.rank)
+                eps_outputs, eps_state = run_episode(model, episode_batch)
 
-            # skip if batch_size doesn't match
-            labels = episode_batch['true_states']
-            if batch_size != labels.shape[0]:
-                break
+                # [batch_size, trajlen, [num_particles], ..]
+                labels = batch_samples['true_states'][:, i*seglen : (i+1)*seglen, :]
+                seg_losses = loss_fn(eps_outputs, labels, params)
+                seg_losses['loss_total'].backward()
 
-            outputs = run_episode(model, episode_batch)
+                # visualize gradient flow
+                # pf.plot_grad_flow(pf_cell.named_parameters())
 
-            # [batch_size, trajlen, [num_particles], ..]
-            losses = loss_fn(outputs, labels, params)
-            losses['loss_total'].backward()
+                # update parameters based on gradients
+                optimizer.step()
 
-            # visualize gradient flow
-            # pf.plot_grad_flow(pf_cell.named_parameters())
+                # cleat gradients
+                optimizer.zero_grad()
 
-            # update parameters based on gradients
-            optimizer.step()
+                # continue with previous episode state for same trajectory
+                # detach() since backprop only to current segment
+                episode_batch['particle_states'] = eps_state[0].detach()
+                episode_batch['particle_weights'] = eps_state[1].detach()
 
-            # cleat gradients
-            optimizer.zero_grad()
+                t_loss_total += seg_losses['loss_total'].data
+                t_loss_coords += seg_losses['loss_coords'].data
 
             # log per epoch batch stats (only for gpu:0 or cpu)
             if rank == torch.device('cpu') or rank == 0:
-                loss_total = losses['loss_total'].item()
-                loss_coords = losses['loss_coords'].item()
+                b_loss_total.append(t_loss_total)
+                b_loss_coords.append(t_loss_coords)
 
-                b_loss_total.append(loss_total)
-                b_loss_coords.append(loss_coords)
-
-                print('epoch: {0:05d}, batch: {1:05d}, b_loss_coords: {2:03.3f}, b_loss_total: {3:03.3f}'.format(epoch, batch_idx, loss_coords, loss_total))
+                print('train epoch: {0:05d}, batch: {1:05d}, b_loss_coords: {2:03.3f}, b_loss_total: {3:03.3f}'.format(epoch, batch_idx, t_loss_coords, t_loss_total))
                 writer.add_scalars('epoch-{0:03d}_train_stats'.format(epoch), {
-                    'b_total_loss': loss_total,
-                    'b_coords_loss': loss_coords
+                    't_total_loss': t_loss_total,
+                    't_coords_loss': t_loss_coords
                 }, batch_idx)
 
         # log per epoch mean stats (only for gpu:0 or cpu)
         if rank == torch.device('cpu') or rank == 0:
-            print('epoch: {0:05d}, mean_loss_coords: {1:03.3f}, mean_loss_total: {2:03.3f}'.format(epoch, np.mean(b_loss_coords), np.mean(b_loss_total)))
+            print('train epoch: {0:05d}, mean_loss_coords: {1:03.3f}, mean_loss_total: {2:03.3f}'.format(epoch, np.mean(b_loss_coords), np.mean(b_loss_total)))
             writer.add_scalars('train_stats', {
                     'mean_total_loss': np.mean(b_loss_total),
                     'mean_coords_loss': np.mean(b_loss_coords)
@@ -181,19 +198,16 @@ def run_validation(model, valid_loader, params):
             episode_batch['odometry'] = batch_samples['odometry'].to(params.rank)
             episode_batch['global_map'] = batch_samples['global_map'].to(params.rank)
             episode_batch['observation'] = batch_samples['observation'].to(params.rank)
-            episode_batch['init_particles'] = batch_samples['init_particles'].to(params.rank)
+            episode_batch['particle_states'] = batch_samples['init_particles'].to(params.rank)
 
-            batch_size, num_particles = episode_batch['init_particles'].shape[:2]
-            episode_batch['init_particle_weights'] = torch.full((batch_size, num_particles), np.log(1.0/num_particles)).to(params.rank)
+            batch_size, num_particles = episode_batch['particle_states'].shape[:2]
+            episode_batch['particle_weights'] = torch.full((batch_size, num_particles), np.log(1.0/num_particles)).to(params.rank)
 
-            # skip if batch_size doesn't match
+            #HACK validating on entire trajectory instead of running shorter segments
+            eps_outputs, _ = run_episode(model, episode_batch)
+
             labels = episode_batch['true_states']
-            if batch_size != labels.shape[0]:
-                break
-
-            outputs = run_episode(model, episode_batch)
-
-            losses = loss_fn(outputs, labels, params)
+            losses = loss_fn(eps_outputs, labels, params)
 
             # log per epoch batch stats (only for gpu:0 or cpu)
             if rank == torch.device('cpu') or rank == 0:
@@ -203,7 +217,7 @@ def run_validation(model, valid_loader, params):
                 b_loss_total.append(loss_total)
                 b_loss_coords.append(loss_coords)
 
-                print('epoch: {0:05d}, batch: {1:05d}, b_loss_coords: {2:03.3f}, b_loss_total: {3:03.3f}'.format(epoch, batch_idx, loss_coords, loss_total))
+                print(' eval epoch: {0:05d}, batch: {1:05d}, b_loss_coords: {2:03.3f}, b_loss_total: {3:03.3f}'.format(epoch, batch_idx, loss_coords, loss_total))
                 writer.add_scalars('epoch-{0:03d}_eval_stats'.format(epoch), {
                     'b_total_loss': loss_total,
                     'b_coords_loss': loss_coords
@@ -211,7 +225,7 @@ def run_validation(model, valid_loader, params):
 
         # log per epoch mean stats (only for gpu:0 or cpu)
         if rank == torch.device('cpu') or rank == 0:
-            print('epoch: {0:05d}, mean_loss_coords: {1:03.3f}, mean_loss_total: {2:03.3f}'.format(epoch, np.mean(b_loss_coords), np.mean(b_loss_total)))
+            print(' eval epoch: {0:05d}, mean_loss_coords: {1:03.3f}, mean_loss_total: {2:03.3f}'.format(epoch, np.mean(b_loss_coords), np.mean(b_loss_total)))
             writer.add_scalars('train_stats', {
                     'mean_total_loss': np.mean(b_loss_total),
                     'mean_coords_loss': np.mean(b_loss_coords)
@@ -295,7 +309,8 @@ if __name__ == '__main__':
     argparser.add_argument('--batch_size', type=int, default=4, help='batch size used for training')
     argparser.add_argument('--num_workers', type=int, default=0, help='workers used for data loading')
     argparser.add_argument('--num_particles', type=int, default=30, help='number of particles used for training')
-    argparser.add_argument('--trajlen', type=int, default=24, help='trajectory length to train [max 100]')
+    argparser.add_argument('--trajlen', type=int, default=25, help='trajectory length to train [max 100]')
+    argparser.add_argument('--seglen', type=int, default=5, help='short train segement length to train [max 100]')
     argparser.add_argument('--transition_std', nargs='*', default=['0.0', '0.0'], help='std for motion model, translation std (meters), rotatation std (radians)')
     argparser.add_argument('--local_map_size', nargs='*', default=(28, 28), help='shape of local map')
     argparser.add_argument('--n_gpu', type=int, default=-1, help='number of gpus to train')
