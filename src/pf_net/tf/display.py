@@ -55,12 +55,13 @@ def draw_particles(robot_plt, particles, particle_weights):
 def visualize(params):
     model = pf.PFCell(params).to(params.rank)
     model = load(model, params.file_name)
+    model.eval()
 
     # data loader
     composed = transforms.Compose([
                 pf.ToTensor(),
     ])
-    dataset = pf.House3DTrajDataset(params, params.train_file, transform=composed)
+    dataset = pf.House3DTrajDataset(params, 'valid', transform=composed)
     data_loader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=params.num_workers)
 
     episode_batch = next(iter(data_loader))
@@ -170,8 +171,8 @@ def str2bool(v):
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser()
 
-    argparser.add_argument('--train_file', type=str, default='../data/valid.tfrecords', help='path to the training .tfrecords')
-    argparser.add_argument('--type', type=str, default='valid', help='type of .tfrecords')
+    argparser.add_argument('--train_file', type=str, default='../data/test.tfrecords', help='path to the training .tfrecords')
+    argparser.add_argument('--valid_file', type=str, default='../data/test.tfrecords', help='path to the validating .tfrecords')
     argparser.add_argument('--num_epochs', type=int, default=20, help='number of epochs to train')
     argparser.add_argument('--resample', type=str2bool, nargs='?', const=True, default=False, help='use resampling during training')
     argparser.add_argument('--alpha_resample_ratio', type=float, default=0.5, help='alpha=0: uniform sampling (ignoring weights) and alpha=1: standard hard sampling (produces zero gradients)')
