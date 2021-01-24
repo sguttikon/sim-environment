@@ -172,7 +172,7 @@ def run_training(rank, params):
                 b_loss.append(t_loss)
                 b_mse_last.append(t_mse_last)
 
-                print('train epoch: {0:05d}, batch: {1:05d}, b_loss: {2:03.3f}'.format(epoch, batch_idx, t_loss))
+                print('train epoch: {0:05d}, batch: {1:05d}, b_loss: {2:03.3f}, mse_last: {3:03.3f}'.format(epoch, batch_idx, t_loss, t_mse_last))
                 writer.add_scalars('epoch-{0:03d}_train_stats'.format(epoch), {
                     't_loss': t_loss,
                     't_mse_last': t_mse_last
@@ -180,7 +180,7 @@ def run_training(rank, params):
 
         # log per epoch mean stats (only for gpu:0 or cpu)
         if rank == torch.device('cpu') or rank == 0:
-            print('train epoch: {0:05d}, mean_loss_coords: {1:03.3f}, mean_loss: {2:03.3f}'.format(epoch, np.mean(b_loss)))
+            print('train epoch: {0:05d}, mean_loss: {1:03.3f}, mean_mse_last: {2:03.3f}'.format(epoch, np.mean(b_loss), np.mean(b_mse_last)))
             writer.add_scalars('train_stats', {
                     'mean_loss': np.mean(b_loss_total),
                     'mean_mse_last': np.mean(b_mse_last),
@@ -344,6 +344,8 @@ if __name__ == '__main__':
     argparser.add_argument('--num_particles', type=int, default=30, help='number of particles used for training')
     argparser.add_argument('--trajlen', type=int, default=25, help='trajectory length to train [max 100]')
     argparser.add_argument('--seglen', type=int, default=5, help='short train segement length to train [max 100]')
+    argparser.add_argument('--init_particles_distr', type=str, default='gaussian', help='options: [gaussian, one-room]')
+    argparser.add_argument('--init_particles_std', nargs='*', default=['0.3', '0.523599'], help='std for init distribution, position std (meters), rotatation std (radians)')
     argparser.add_argument('--transition_std', nargs='*', default=['0.0', '0.0'], help='std for motion model, translation std (meters), rotatation std (radians)')
     argparser.add_argument('--local_map_size', nargs='*', default=(28, 28), help='shape of local map')
     argparser.add_argument('--global_map_size', nargs='*', default=(3500, 3500), help='shape of local map')
@@ -356,8 +358,6 @@ if __name__ == '__main__':
     params = argparser.parse_args()
 
     params.map_pixel_in_meters = 0.02
-    params.init_particles_distr = 'gaussian'
-    params.init_particles_std = ['0.3', '0.523599']  # 30cm, 30degrees
 
     # convert multi-input fileds to numpy arrays
     params.init_particles_std = np.array(params.init_particles_std, np.float32)

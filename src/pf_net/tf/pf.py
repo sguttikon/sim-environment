@@ -16,9 +16,9 @@ import torch
 import cv2
 import os
 
-test_data_size = 820
-train_data_size = 74800
-valid_data_size = 830
+test_data_size = 800 # 820
+train_data_size = 8000 # 74800
+valid_data_size = 800 # 830
 
 np.set_printoptions(precision=5, suppress=True)
 
@@ -28,13 +28,10 @@ class House3DTrajDataset(Dataset):
         self.params = params
 
         # build initial covariance matrix of particles, in pixels and radians
-        if params.init_particles_distr == 'gaussian':
-            particle_std = params.init_particles_std.copy()
-            particle_std[0] = particle_std[0] / params.map_pixel_in_meters
-            particle_var = np.square(particle_std)  # variance
-            self.params.init_particles_cov = np.diag(particle_var[(0, 0, 1),]) # 3x3 matrix
-        else:
-            assert False
+        particle_std = params.init_particles_std.copy()
+        particle_std[0] = particle_std[0] / params.map_pixel_in_meters
+        particle_var = np.square(particle_std)  # variance
+        self.params.init_particles_cov = np.diag(particle_var[(0, 0, 1),]) # 3x3 matrix
 
         self.map_shape = [params.global_map_size[0], params.global_map_size[1]] + [1]
 
@@ -83,6 +80,11 @@ class House3DTrajDataset(Dataset):
         # process maps
         map_wall = self.process_wall_map(features['map_wall'].bytes_list.value[0])
         global_map_list = [map_wall]
+        if self.params.init_particles_distr == 'gaussian':
+            map_roomid = None
+        else:
+            map_roomid = self.process_roomid_map(features['map_roomid'].bytes_list.value[0])
+
         #TODO other maps
 
         # input global map is a concatenation of semantic channels
@@ -111,11 +113,12 @@ class House3DTrajDataset(Dataset):
         observation = self.raw_images_to_array(list(features['rgb'].bytes_list.value)[:self.params.trajlen])
 
         # compute random init particles
-        init_particles = self.random_particles(true_states[0], seed=self.get_sample_seed(self.params.seed, idx))
+        init_particles = self.random_particles(true_states[0], map_roomid, seed=self.get_sample_seed(self.params.seed, idx))
 
         sample = {}
         sample['true_states'] = true_states # np.array(np.split(true_states, self.num_segments))
-        sample['global_map'] = new_global_map # np.expand_dims(new_global_map, axis=0)
+        sample['global_map'] =  new_global_map # np.expand_dims(new_global_map, axis=0)
+        sample['org_map_shape'] = np.array(list(global_map.shape))
         sample['init_particles'] = init_particles # np.expand_dims(init_particles, axis=0)
         sample['observation'] =  observation # np.array(np.split(observation, self.num_segments))
         sample['odometry'] = odometry # np.array(np.split(odometry, self.num_segments))
@@ -137,13 +140,21 @@ class House3DTrajDataset(Dataset):
         floormap = floormap.astype(np.float32) * (2.0/255.0) - 1.0
         return floormap
 
+    def process_roomid_map(self, roomidmap_feature):
+        # axes is not transposed
+        roomidmap = np.atleast_3d(self.decode_image(roomidmap_feature))
+        return roomidmap
+
     def get_sample_seed(self, seed, data_i):
         return (None if (seed is None or seed == 0) else ((data_i + 1) * 113 + seed))
 
-    def random_particles(self, init_state, seed):
+    def random_particles(self, init_state, roomidmap, seed):
+        distr = self.params.init_particles_distr
+        assert distr in ["gaussian", "one-room"]
+
         particles = np.zeros((self.params.num_particles, 3), np.float32)
 
-        if self.params.init_particles_distr == 'gaussian':
+        if distr == 'gaussian':
             # fix seed
             if seed is not None:
                 random_state = np.random.get_state()
@@ -158,10 +169,44 @@ class House3DTrajDataset(Dataset):
 
             # sample particles from gaussian centered around the offset
             particles = np.random.multivariate_normal(mean=center, cov=self.params.init_particles_cov, size=self.params.num_particles)
-        else:
-            assert False
+        elif distr == 'one-room':
+            # mask the room of current state
+            r, c = int(np.rint(init_state[0])), int(np.rint(init_state[1]))
+            masked_map = (roomidmap == roomidmap[r, c])
+
+            # get bounding box for efficient sampling
+            rmin, rmax, cmin, cmax = self.bounding_box(masked_map)
+
+            #HACK further restrict
+            lmt = self.params.init_particles_cov[0, 0] // 10
+            if rmin < (r - lmt):
+                rmin = (r - lmt)
+            if rmax > (r + lmt):
+                rmax = (r + lmt)
+            if cmin < (c - lmt):
+                cmin = (c - lmt)
+            if cmax > (c + lmt):
+                cmax = (c + lmt)
+
+            # rejection sampling inside the bounding box
+            sample_i = 0
+            while sample_i < self.params.num_particles:
+                particle = np.random.uniform(low=(rmin, cmin, 0.0), high=(rmax, cmax, 2.0*np.pi), size=(3, ),)
+                # reject if mask is zero
+                if not masked_map[int(np.rint(particle[0])), int(np.rint(particle[1]))]:
+                    continue
+                particles[sample_i] = particle
+                sample_i += 1
 
         return particles
+
+    def bounding_box(self, img):
+        rows = np.any(img, axis=1)
+        cols = np.any(img, axis=0)
+        rmin, rmax = np.where(rows)[0][[0, -1]]
+        cmin, cmax = np.where(cols)[0][[0, -1]]
+
+        return rmin, rmax, cmin, cmax
 
     def decode_image(self, img_str, resize=None):
         nparr = np.frombuffer(img_str, np.uint8)

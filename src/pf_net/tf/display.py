@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+import matplotlib.animation as animation
 from torch.utils.data import DataLoader
 from matplotlib.patches import Wedge
 from matplotlib.patches import Arrow
@@ -10,6 +12,7 @@ import numpy as np
 import argparse
 import random
 import torch
+import cv2
 import pf
 
 np.set_printoptions(precision=3, suppress=True)
@@ -46,7 +49,7 @@ def draw_particles(robot_plt, particles, particle_weights):
     colors = cm.rainbow(particle_weights)
     positions = particles[:, 0:2]
     if 'particles' not in robot_plt:
-        robot_plt['particles'] = plt.scatter(positions[:, 0], positions[:, 1], s=10, c=colors, alpha=.75)
+        robot_plt['particles'] = plt.scatter(positions[:, 0], positions[:, 1], s=10, c=colors, alpha=.25)
     else:
         robot_plt['particles'].set_offsets(positions[:, 0:2])
         robot_plt['particles'].set_color(colors)
@@ -69,6 +72,7 @@ def visualize(params):
     true_states = episode_batch['true_states'].to(params.rank)
     odometries = episode_batch['odometry'].to(params.rank)
     global_maps = episode_batch['global_map'].to(params.rank)
+    org_map_shape = episode_batch['org_map_shape']
     observations = episode_batch['observation'].to(params.rank)
     init_particle_states = episode_batch['init_particles'].to(params.rank)
 
@@ -83,12 +87,21 @@ def visualize(params):
     t_particle_weights = []
 
     # plot map
-    global_map = global_maps[0, 0].detach().cpu().numpy()
+    shape = org_map_shape[0]
+    org_global_maps = global_maps[0][:shape[2], :shape[0], :shape[1]]
+    global_map = org_global_maps[0].detach().cpu().numpy()
     map_plt = draw_map(global_map)
 
     gt_plt = {}
     est_plt = {}
 
+    # plot init est pose particles
+    particles = state[0][0].detach().cpu().numpy()
+    lin_weights = torch.nn.functional.softmax(state[1], dim=-1)
+    particle_weights = lin_weights[0].detach().cpu().numpy()
+    draw_particles(est_plt, particles, particle_weights)
+
+    images = []
     # iterate over trajectory_length
     for traj in range(trajlen):
         true_state = true_states[:, traj, :]
@@ -117,6 +130,13 @@ def visualize(params):
         particle_weights = lin_weights[0].detach().cpu().numpy()
         draw_particles(est_plt, particles, particle_weights)
 
+        plt_ax.legend([gt_plt['robot'], est_plt['robot']], ["gt_pose", "est_pose"])
+
+        canvas.draw()
+        img = np.array(canvas.renderer._renderer)
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        images.append(img)
+
 
     t_particle_states = torch.cat(t_particle_states, axis=1)
     t_particle_weights = torch.cat(t_particle_weights, axis=1)
@@ -130,7 +150,7 @@ def visualize(params):
     est_state[:2] *= params.map_pixel_in_meters
     print(f'gt pose:  {gt_state}\nest pose: {est_state} in (mts, radians)')
 
-    return outputs
+    return images
 
 def loss_fn(particle_states, particle_weights, true_states, params):
 
@@ -178,9 +198,13 @@ if __name__ == '__main__':
     argparser.add_argument('--alpha_resample_ratio', type=float, default=0.5, help='alpha=0: uniform sampling (ignoring weights) and alpha=1: standard hard sampling (produces zero gradients)')
     argparser.add_argument('--batch_size', type=int, default=4, help='batch size used for training')
     argparser.add_argument('--num_workers', type=int, default=0, help='workers used for data loading')
-    argparser.add_argument('--num_particles', type=int, default=30, help='number of particles used for training')
+    argparser.add_argument('--num_particles', type=int, default=200, help='number of particles used for training')
+    argparser.add_argument('--trajlen', type=int, default=25, help='trajectory length to train [max 100]')
+    argparser.add_argument('--init_particles_distr', type=str, default='gaussian', help='options: [gaussian, one-room]')
+    argparser.add_argument('--init_particles_std', nargs='*', default=['0.3', '0.523599'], help='std for init distribution, position std (meters), rotatation std (radians)')
     argparser.add_argument('--transition_std', nargs='*', default=['0.0', '0.0'], help='std for motion model, translation std (meters), rotatation std (radians)')
     argparser.add_argument('--local_map_size', nargs='*', default=(28, 28), help='shape of local map')
+    argparser.add_argument('--global_map_size', nargs='*', default=(3500, 3500), help='shape of local map')
     argparser.add_argument('--n_gpu', type=int, default=-1, help='number of gpus to train')
     argparser.add_argument('--use_lfc', type=str2bool, nargs='?', const=True, default=False, help='use LocallyConnected2d')
     argparser.add_argument('--dataparallel', type=str2bool, nargs='?', const=True, default=False, help='get parallel data training')
@@ -188,10 +212,7 @@ if __name__ == '__main__':
 
     params = argparser.parse_args()
 
-    params.trajlen = 24
     params.map_pixel_in_meters = 0.02
-    params.init_particles_distr = 'gaussian'
-    params.init_particles_std = ['0.3', '0.523599']  # 30cm, 30degrees
 
     # convert multi-input fileds to numpy arrays
     params.init_particles_std = np.array(params.init_particles_std, np.float32)
@@ -214,8 +235,16 @@ if __name__ == '__main__':
 
     fig = plt.figure(figsize=(7, 7))
     plt_ax = fig.add_subplot(111)
+    canvas = FigureCanvasAgg(fig)
 
     params.file_name = './bckp/jan_23_1/saved_models/pfnet_eps_00049.pth'
-    visualize(params)
+    images = visualize(params)
 
-    plt.show()
+    size = (images[0].shape[0], images[0].shape[1])
+    out = cv2.VideoWriter('output.avi', cv2.VideoWriter_fourcc(*'MPEG'), 20, size)
+
+    for i in range(len(images)):
+        out.write(images[i])
+    out.release()
+
+    #plt.show()
