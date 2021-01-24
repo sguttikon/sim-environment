@@ -54,7 +54,7 @@ def run_episode(model, episode_batch):
     return eps_outputs, eps_state
 
 def run_training(rank, params):
-    print(f"Running basic DDP example on rank {rank}.")
+    print(f"Training on GPU rank {rank}.")
 
     # create model and move it to GPU with id rank
     if rank != torch.device('cpu'):
@@ -81,7 +81,7 @@ def run_training(rank, params):
 
     valid_dataset = pf.House3DTrajDataset(params, 'valid', transform=composed)
     valid_loader = DataLoader(valid_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
-    print(f'validation file: {params.valid_file} has {len(train_loader)} records')
+    print(f'validation file: {params.valid_file} has {len(valid_dataset)} records')
 
     # train_dataset = TensorDataset(config.masked_sentences, config.original_sentences)
     # train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset,num_replicas=config.world_size)
@@ -92,8 +92,8 @@ def run_training(rank, params):
     num_segments = trajlen // seglen
     # iterate over num_train_epochs
     for epoch in range(params.num_train_epochs):
-        b_loss_total = []
-        b_loss_coords = []
+        b_loss = []
+        b_mse_last = []
         model.train()
         # iterate over num_batches
         for batch_idx, batch_samples in enumerate(train_loader):
@@ -115,8 +115,7 @@ def run_training(rank, params):
             assert list(batch_samples['init_particle_weights'].shape)[1:] == [num_particles]
 
             # traj loss is sum of multiple seg loss
-            t_loss_total = 0
-            t_loss_coords = 0
+            t_loss = 0
 
             # start each episode trajectory with init particles and weights state
             episode_batch = {}
@@ -129,12 +128,21 @@ def run_training(rank, params):
                 episode_batch['odometry'] = batch_samples['odometry'][:, i*seglen : (i+1)*seglen, :]
                 episode_batch['observation'] = batch_samples['observation'][:, i*seglen : (i+1)*seglen, :]
 
+                # sanity check
+                assert list(episode_batch['odometry'].shape)[1:] == [seglen, 3]
+                assert list(episode_batch['observation'].shape)[1:] == [seglen, 3, 56, 56]
                 eps_outputs, eps_state = run_episode(model, episode_batch)
 
                 # [batch_size, trajlen, [num_particles], ..]
                 labels = batch_samples['true_states'][:, i*seglen : (i+1)*seglen, :]
                 seg_losses = loss_fn(eps_outputs, labels, params)
-                seg_losses['loss_total'].backward()
+
+                if params.use_loss == 'pfnet_loss':
+                    loss = seg_losses['pfnet_loss']
+                elif params.use_loss == 'dpf_loss':
+                    loss = seg_losses['dpf_loss']
+
+                loss.backward()
 
                 # visualize gradient flow
                 # pf.plot_grad_flow(pf_cell.named_parameters())
@@ -150,26 +158,32 @@ def run_training(rank, params):
                 episode_batch['particle_states'] = eps_state[0].detach()
                 episode_batch['particle_weights'] = eps_state[1].detach()
 
-                t_loss_total += seg_losses['loss_total'].item()
-                t_loss_coords += seg_losses['loss_coords'].item()
+                t_loss += loss.item()
+
+            # MSE at end of episode
+            lin_weights = torch.nn.functional.softmax(episode_batch['particle_weights'], dim=-1)
+            l_mean_state = torch.sum(torch.mul(episode_batch['particle_states'][:, :, :], lin_weights[:, :, None]), dim=1)
+            l_true_state = labels[:, -1, :]
+            rescales = [params.map_pixel_in_meters, params.map_pixel_in_meters, 0.36]
+            t_mse_last = torch.mean(compute_sq_distance(l_mean_state, l_true_state, rescales)).item()
 
             # log per epoch batch stats (only for gpu:0 or cpu)
             if rank == torch.device('cpu') or rank == 0:
-                b_loss_total.append(t_loss_total)
-                b_loss_coords.append(t_loss_coords)
+                b_loss.append(t_loss)
+                b_mse_last.append(t_mse_last)
 
-                print('train epoch: {0:05d}, batch: {1:05d}, b_loss_coords: {2:03.3f}, b_loss_total: {3:03.3f}'.format(epoch, batch_idx, t_loss_coords, t_loss_total))
+                print('train epoch: {0:05d}, batch: {1:05d}, b_loss: {2:03.3f}'.format(epoch, batch_idx, t_loss))
                 writer.add_scalars('epoch-{0:03d}_train_stats'.format(epoch), {
-                    't_total_loss': t_loss_total,
-                    't_coords_loss': t_loss_coords
+                    't_loss': t_loss,
+                    't_mse_last': t_mse_last
                 }, batch_idx)
 
         # log per epoch mean stats (only for gpu:0 or cpu)
         if rank == torch.device('cpu') or rank == 0:
-            print('train epoch: {0:05d}, mean_loss_coords: {1:03.3f}, mean_loss_total: {2:03.3f}'.format(epoch, np.mean(b_loss_coords), np.mean(b_loss_total)))
+            print('train epoch: {0:05d}, mean_loss_coords: {1:03.3f}, mean_loss: {2:03.3f}'.format(epoch, np.mean(b_loss)))
             writer.add_scalars('train_stats', {
-                    'mean_total_loss': np.mean(b_loss_total),
-                    'mean_coords_loss': np.mean(b_loss_coords)
+                    'mean_loss': np.mean(b_loss_total),
+                    'mean_mse_last': np.mean(b_mse_last),
             }, epoch)
 
         # validate
@@ -265,13 +279,30 @@ def loss_fn(outputs, true_states, params):
     loss_orient = torch.square(torch.sum(orient_diffs * lin_weights, axis=2))
 
     # combine translational and orientation losses
-    loss_combined = loss_coords + 0.36 * loss_orient
+    pfnet_loss = loss_coords + 0.36 * loss_orient
+
+    # negative log likelihood loss
+    rescales = [params.map_pixel_in_meters, params.map_pixel_in_meters, 0.36]
+    sq_distance = compute_sq_distance(particle_states[:, :, :, :], true_states[:, :, None, :], rescales)
+    std = 0.01
+    particle_std=0.2
+    log_likelihood = torch.sum(lin_weights - np.log(np.sqrt(2 * np.pi * std ** 2)) - (sq_distance / (2.0 * particle_std ** 2)), axis=2)
+    dpf_loss = -log_likelihood
 
     losses = {}
-    losses['loss_coords'] = torch.mean(loss_coords)
-    losses['loss_total'] = torch.mean(loss_combined)
+    losses['pfnet_loss'] = torch.mean(pfnet_loss)
+    losses['dpf_loss'] = torch.mean(dpf_loss)
 
     return losses
+
+def compute_sq_distance(a, b, rescales):
+    result = 0.0
+    for i in range(a.shape[-1]):
+        diff = a[..., i] - b[..., i]
+        if i == 2:
+            diff = pf.normalize(diff, isTensor=True)
+        result += (diff * rescales[i]) ** 2
+    return result
 
 def save(model, file_name):
     torch.save({
@@ -316,7 +347,8 @@ if __name__ == '__main__':
     argparser.add_argument('--transition_std', nargs='*', default=['0.0', '0.0'], help='std for motion model, translation std (meters), rotatation std (radians)')
     argparser.add_argument('--local_map_size', nargs='*', default=(28, 28), help='shape of local map')
     argparser.add_argument('--global_map_size', nargs='*', default=(3500, 3500), help='shape of local map')
-    argparser.add_argument('--n_gpu', type=int, default=-1, help='number of gpus to train')
+    argparser.add_argument('--use_gpus', type=str, nargs='*', default=None, help='gpu(s) to train')
+    argparser.add_argument('--use_loss', type=str, default='pfnet_loss', help='options: [pfnet_loss, dpf_loss]')
     argparser.add_argument('--use_lfc', type=str2bool, nargs='?', const=True, default=False, help='use LocallyConnected2d')
     argparser.add_argument('--dataparallel', type=str2bool, nargs='?', const=True, default=False, help='get parallel data training')
     argparser.add_argument('--seed', type=int, default=42, help='random seed')
@@ -337,22 +369,26 @@ if __name__ == '__main__':
     np.random.seed(params.seed)
     random.seed(params.seed)
 
-    use_cuda = params.n_gpu > 0 and torch.cuda.is_available()
+    use_cuda = params.use_gpus is not None and torch.cuda.is_available()
     n_gpus = torch.cuda.device_count()
     if not use_cuda:
         print('switching to CPU')
         params.n_gpu = -1
-    elif n_gpus < params.n_gpu:
+    elif n_gpus < len(params.use_gpus):
         os.environ['CUDA_VISIBLE_DEVICES'] = ','.join([str(elem) for elem in range(n_gpus)])
         params.n_gpu = n_gpus
+    else:
+        os.environ['CUDA_VISIBLE_DEVICES'] = ','.join([elem for elem in params.use_gpus])
+        params.n_gpu = len(params.use_gpus)
     params.world_size = params.n_gpu
 
     print("#########################")
     print(params)
     print("#########################")
 
-    if params.n_gpu > 0:
+    if use_cuda:
         # multi-process run
+        print(f'Available GPUs: {os.environ["CUDA_VISIBLE_DEVICES"]}')
         mp.spawn(run_training, nprocs=params.n_gpu, args=(params,))
     else:
         # normal run
