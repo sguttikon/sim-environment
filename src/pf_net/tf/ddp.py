@@ -182,7 +182,7 @@ def run_training(rank, params):
         if rank == torch.device('cpu') or rank == 0:
             print('train epoch: {0:05d}, mean_loss: {1:03.3f}, mean_mse_last: {2:03.3f}'.format(epoch, np.mean(b_loss), np.mean(b_mse_last)))
             writer.add_scalars('train_stats', {
-                    'mean_loss': np.mean(b_loss_total),
+                    'mean_loss': np.mean(b_loss),
                     'mean_mse_last': np.mean(b_mse_last),
             }, epoch)
 
@@ -204,8 +204,8 @@ def run_validation(model, valid_loader, params):
 
     # iterate over num_valid_epochs
     for epoch in range(params.num_valid_epochs):
-        b_loss_total = []
-        b_loss_coords = []
+        b_loss = []
+        b_mse_last = []
         model.eval()
         # iterate over num_batches
         for batch_idx, batch_samples in enumerate(valid_loader):
@@ -224,31 +224,39 @@ def run_validation(model, valid_loader, params):
 
             labels = episode_batch['true_states']
             losses = loss_fn(eps_outputs, labels, params)
+            if params.use_loss == 'pfnet_loss':
+                t_loss = losses['pfnet_loss'].item()
+            elif params.use_loss == 'dpf_loss':
+                t_loss = losses['dpf_loss'].item()
+
+            # MSE at end of episode
+            lin_weights = torch.nn.functional.softmax(episode_batch['particle_weights'], dim=-1)
+            l_mean_state = torch.sum(torch.mul(episode_batch['particle_states'][:, :, :], lin_weights[:, :, None]), dim=1)
+            l_true_state = labels[:, -1, :]
+            rescales = [params.map_pixel_in_meters, params.map_pixel_in_meters, 0.36]
+            t_mse_last = torch.mean(compute_sq_distance(l_mean_state, l_true_state, rescales)).item()
 
             # log per epoch batch stats (only for gpu:0 or cpu)
             if rank == torch.device('cpu') or rank == 0:
-                loss_total = losses['loss_total'].item()
-                loss_coords = losses['loss_coords'].item()
+                b_loss.append(t_loss)
+                b_mse_last.append(t_mse_last)
 
-                b_loss_total.append(loss_total)
-                b_loss_coords.append(loss_coords)
-
-                print(' eval epoch: {0:05d}, batch: {1:05d}, b_loss_coords: {2:03.3f}, b_loss_total: {3:03.3f}'.format(epoch, batch_idx, loss_coords, loss_total))
+                print(' eval epoch: {0:05d}, batch: {1:05d}, b_loss: {2:03.3f}, mse_last: {3:03.3f}'.format(epoch, batch_idx, t_loss, t_mse_last))
                 writer.add_scalars('epoch-{0:03d}_eval_stats'.format(epoch), {
-                    'b_total_loss': loss_total,
-                    'b_coords_loss': loss_coords
+                    't_loss': t_loss,
+                    't_mse_last': t_mse_last
                 }, batch_idx)
 
         # log per epoch mean stats (only for gpu:0 or cpu)
         if rank == torch.device('cpu') or rank == 0:
-            print(' eval epoch: {0:05d}, mean_loss_coords: {1:03.3f}, mean_loss_total: {2:03.3f}'.format(epoch, np.mean(b_loss_coords), np.mean(b_loss_total)))
+            print(' eval epoch: {0:05d}, mean_loss: {1:03.3f}, mean_mse_last: {2:03.3f}'.format(epoch, np.mean(b_loss), np.mean(b_mse_last)))
             writer.add_scalars('train_stats', {
-                    'mean_total_loss': np.mean(b_loss_total),
-                    'mean_coords_loss': np.mean(b_loss_coords)
+                    'mean_loss': np.mean(b_loss),
+                    'mean_mse_last': np.mean(b_mse_last),
             }, epoch)
 
         # save (only for gpu:0 or cpu)
-        file_name = 'eval_models/' + 'pfnet_eval_eps_{0:03.3f}.pth'.format(np.mean(b_loss_total))
+        file_name = 'eval_models/' + 'pfnet_eval_eps_{0:03.3f}.pth'.format(np.mean(b_loss))
         if rank == torch.device('cpu'):
             save(model, file_name)
         elif rank == 0:
