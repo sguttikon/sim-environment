@@ -51,19 +51,16 @@ class House3DTrajDataset(Dataset):
         # self.raw_dataset = self.raw_dataset.apply(tf.data.experimental.assert_cardinality(self.test_data_size))
         # print(tf.data.experimental.cardinality(self.raw_dataset).numpy())
 
-        # self.count = sum(1 for _ in self.raw_dataset)
-        # print(self.count)
+        if file.endswith('train.tfrecords'):
+            #HACK
+            self.count = train_data_size
+        else:
+            self.count = sum(1 for _ in self.raw_dataset)
 
         self.transform = transform
 
     def __len__(self):
-        #HACK
-        if self.params.type == 'train':
-            return valid_data_size
-        elif self.params.type == 'valid':
-            return test_data_size
-        # elif self.params.type == 'train':
-        #     return train_data_size
+        return self.count
 
     def __getitem__(self, idx):
 

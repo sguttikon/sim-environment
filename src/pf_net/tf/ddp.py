@@ -77,9 +77,11 @@ def run_training(rank, params):
     ])
     train_dataset = pf.House3DTrajDataset(params, 'train', transform=composed)
     train_loader = DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
+    print(f'file: {params.train_file} has {len(train_loader)} records')
 
     valid_dataset = pf.House3DTrajDataset(params, 'valid', transform=composed)
     valid_loader = DataLoader(valid_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
+    print(f'file: {params.valid_file} has {len(valid_loader)} records')
 
     # train_dataset = TensorDataset(config.masked_sentences, config.original_sentences)
     # train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset,num_replicas=config.world_size)
