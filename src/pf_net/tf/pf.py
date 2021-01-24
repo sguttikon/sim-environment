@@ -36,7 +36,7 @@ class House3DTrajDataset(Dataset):
         else:
             assert False
 
-        self.map_shape = (3000, 3000, 1)
+        self.map_shape = [params.global_map_size[0], params.global_map_size[1]] + [1]
 
         self.params.type = type
         if type == 'train':

@@ -107,7 +107,7 @@ def run_training(rank, params):
             # sanity check
             assert list(batch_samples['true_states'].shape)[1:] == [trajlen, 3]
             assert list(batch_samples['odometry'].shape)[1:] == [trajlen, 3]
-            assert list(batch_samples['global_map'].shape)[1:] == [1, 3000, 3000]
+            # assert list(batch_samples['global_map'].shape)[1:] == [1, 3000, 3000]
             assert list(batch_samples['observation'].shape)[1:] == [trajlen, 3, 56, 56]
             assert list(batch_samples['init_particles'].shape)[1:] == [num_particles, 3]
             assert list(batch_samples['init_particle_weights'].shape)[1:] == [num_particles]
@@ -148,8 +148,8 @@ def run_training(rank, params):
                 episode_batch['particle_states'] = eps_state[0].detach()
                 episode_batch['particle_weights'] = eps_state[1].detach()
 
-                t_loss_total += seg_losses['loss_total'].data
-                t_loss_coords += seg_losses['loss_coords'].data
+                t_loss_total += seg_losses['loss_total'].item()
+                t_loss_coords += seg_losses['loss_coords'].item()
 
             # log per epoch batch stats (only for gpu:0 or cpu)
             if rank == torch.device('cpu') or rank == 0:
@@ -313,6 +313,7 @@ if __name__ == '__main__':
     argparser.add_argument('--seglen', type=int, default=5, help='short train segement length to train [max 100]')
     argparser.add_argument('--transition_std', nargs='*', default=['0.0', '0.0'], help='std for motion model, translation std (meters), rotatation std (radians)')
     argparser.add_argument('--local_map_size', nargs='*', default=(28, 28), help='shape of local map')
+    argparser.add_argument('--global_map_size', nargs='*', default=(3500, 3500), help='shape of local map')
     argparser.add_argument('--n_gpu', type=int, default=-1, help='number of gpus to train')
     argparser.add_argument('--use_lfc', type=str2bool, nargs='?', const=True, default=False, help='use LocallyConnected2d')
     argparser.add_argument('--dataparallel', type=str2bool, nargs='?', const=True, default=False, help='get parallel data training')
