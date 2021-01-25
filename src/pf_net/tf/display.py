@@ -38,7 +38,8 @@ def draw_robot(robot_plt, robot_state, clr):
         plt_ax.add_artist(robot_plt['robot'])
     else:
         robot_plt['robot'].set_center((x, y))
-        robot_plt['heading'].set_alpha(.4)    # oldpose
+        # oldpose
+        robot_plt['heading'].set_alpha(.0)
 
     robot_plt['heading'] = Arrow(x, y, dx, dy, width=10, fc=clr, alpha=.8)
     plt_ax.add_artist(robot_plt['heading'])    # newpose
@@ -57,7 +58,7 @@ def draw_particles(robot_plt, particles, particle_weights):
 
 def visualize(params):
     model = pf.PFCell(params).to(params.rank)
-    model = load(model, params.file_name)
+    model = load(model, params.checkpoint)
     model.eval()
 
     # data loader
@@ -224,6 +225,7 @@ def str2bool(v):
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser()
 
+    argparser.add_argument('--checkpoint', type=str, default='./saved_models/pfnet_eps_00000.pth', help='load pretrained model *.pth checkpoint')
     argparser.add_argument('--valid_file', type=str, default='../data/test.tfrecords', help='path to the validating .tfrecords')
     argparser.add_argument('--num_valid_epochs', type=int, default=1, help='number of epochs to eval')
     argparser.add_argument('--resample', type=str2bool, nargs='?', const=True, default=False, help='use resampling during training')
@@ -266,11 +268,10 @@ if __name__ == '__main__':
     else:
         params.rank = torch.device('cpu')
 
-    fig = plt.figure(figsize=(7, 7))
+    fig = plt.figure(figsize=(10, 10))
     plt_ax = fig.add_subplot(111)
     canvas = FigureCanvasAgg(fig)
 
-    params.file_name = './bckp/jan_23_1/saved_models/pfnet_eps_00049.pth'
     images = visualize(params)
 
     size = (images[0].shape[0], images[0].shape[1])
