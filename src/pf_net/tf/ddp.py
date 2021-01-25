@@ -80,10 +80,6 @@ def run_training(rank, params):
     train_loader = DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
     print(f'training file: {params.train_file} has {len(train_dataset)} records')
 
-    valid_dataset = pf.House3DTrajDataset(params, 'valid', transform=composed)
-    valid_loader = DataLoader(valid_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
-    print(f'validation file: {params.valid_file} has {len(valid_dataset)} records')
-
     # train_dataset = TensorDataset(config.masked_sentences, config.original_sentences)
     # train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset,num_replicas=config.world_size)
     # train_dataloader = DataLoader(train_dataset, batch_size=config.BATCH_SIZE,sampler=train_sampler, shuffle=False)
@@ -187,10 +183,6 @@ def run_training(rank, params):
                     'mean_mse_last': np.mean(b_mse_last),
             }, epoch)
 
-        # validate
-        if epoch%5 == 0:
-            run_validation(model, valid_loader, params)
-
         # save (only for gpu:0 or cpu)
         file_name = 'train_models/' + 'pfnet_train_eps_{0:05d}.pth'.format(epoch)
         if rank == torch.device('cpu'):
@@ -201,7 +193,28 @@ def run_training(rank, params):
 
     print('training finished')
 
-def run_validation(model, valid_loader, params):
+def run_validation(rank, params):
+    print(f"Validating on GPU rank {rank}.")
+
+    # create model and move it to GPU with id rank
+    if rank != torch.device('cpu'):
+        setup(rank, params.world_size)
+        torch.cuda.set_device(rank)
+    model = pf.PFCell(params).to(rank)
+    model = load(model, params.checkpoint)
+    params.rank = rank
+
+    if rank != torch.device('cpu'):
+        # wrap the model
+        model = DDP(model, device_ids=[rank], find_unused_parameters=True)
+
+    # data loader
+    composed = transforms.Compose([
+                pf.ToTensor(),
+    ])
+    valid_dataset = pf.House3DTrajDataset(params, 'valid', transform=composed)
+    valid_loader = DataLoader(valid_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
+    print(f'validation file: {params.valid_file} has {len(valid_dataset)} records')
 
     # iterate over num_valid_epochs
     for epoch in range(params.num_valid_epochs):
@@ -361,8 +374,10 @@ if __name__ == '__main__':
 
     argparser.add_argument('--train_file', type=str, default='../data/valid.tfrecords', help='path to the training .tfrecords')
     argparser.add_argument('--valid_file', type=str, default='../data/test.tfrecords', help='path to the validating .tfrecords')
+    argparser.add_argument('--eval', type=str2bool, nargs='?', const=True, default=False, help='validate network')
+    argparser.add_argument('--checkpoint', type=str, default='./saved_models/pfnet_eps_00000.pth', help='load pretrained model *.pth checkpoint')
     argparser.add_argument('--num_train_epochs', type=int, default=20, help='number of epochs to train')
-    argparser.add_argument('--num_valid_epochs', type=int, default=1, help='number of epochs to eval')
+    argparser.add_argument('--num_valid_epochs', type=int, default=20, help='number of epochs to eval')
     argparser.add_argument('--resample', type=str2bool, nargs='?', const=True, default=False, help='use resampling during training')
     argparser.add_argument('--alpha_resample_ratio', type=float, default=0.5, help='alpha=0: uniform sampling (ignoring weights) and alpha=1: standard hard sampling (produces zero gradients)')
     argparser.add_argument('--batch_size', type=int, default=4, help='batch size used for training')
@@ -415,8 +430,14 @@ if __name__ == '__main__':
     if use_cuda:
         # multi-process run
         print(f'Available GPUs: {os.environ["CUDA_VISIBLE_DEVICES"]}')
-        mp.spawn(run_training, nprocs=params.n_gpu, args=(params,))
+        if not params.eval:
+            mp.spawn(run_training, nprocs=params.n_gpu, args=(params,))
+        else:
+            mp.spawn(run_validation, nprocs=params.n_gpu, args=(params,))
     else:
         # normal run
         rank = torch.device('cpu')
-        run_training(rank, params)
+        if not params.eval:
+            run_training(rank, params)
+        else:
+            run_validation(rank, params)
