@@ -54,14 +54,20 @@ def run_episode(model, episode_batch):
 
     return eps_outputs, eps_state
 
-def run_training(rank, params):
-    print(f"Training on GPU rank {rank}.")
+def run_pfnet(rank, params):
+    if not params.eval:
+        print(f"Training on GPU rank {rank}.")
+    else:
+        print(f"Validating on GPU rank {rank}.")
 
     # create model and move it to GPU with id rank
     if rank != torch.device('cpu'):
         setup(rank, params.world_size)
         torch.cuda.set_device(rank)
     model = pf.PFCell(params).to(rank)
+    if params.eval:
+        model = load(model, params.checkpoint)
+
     params.rank = rank
 
     # define optimizer
@@ -76,13 +82,14 @@ def run_training(rank, params):
     composed = transforms.Compose([
                 pf.ToTensor(),
     ])
-    train_dataset = pf.House3DTrajDataset(params, 'train', transform=composed)
-    train_loader = DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
-    print(f'training file: {params.train_file} has {len(train_dataset)} records')
-
-    # train_dataset = TensorDataset(config.masked_sentences, config.original_sentences)
-    # train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset,num_replicas=config.world_size)
-    # train_dataloader = DataLoader(train_dataset, batch_size=config.BATCH_SIZE,sampler=train_sampler, shuffle=False)
+    if not params.eval:
+        train_dataset = pf.House3DTrajDataset(params, 'train', transform=composed)
+        data_loader = DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
+        print(f'training file: {params.train_file} has {len(train_dataset)} records')
+    else:
+        valid_dataset = pf.House3DTrajDataset(params, 'valid', transform=composed)
+        data_loader = DataLoader(valid_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
+        print(f'validation file: {params.valid_file} has {len(valid_dataset)} records')
 
     trajlen, seglen = params.trajlen, params.seglen
     assert trajlen % seglen == 0
@@ -91,9 +98,14 @@ def run_training(rank, params):
     for epoch in range(params.num_train_epochs):
         b_loss = []
         b_mse_last = []
-        model.train()
+
+        if not params.eval:
+            model.train()
+        else:
+            model.eval()
+
         # iterate over num_batches
-        for batch_idx, batch_samples in enumerate(tqdm(train_loader)):
+        for batch_idx, batch_samples in enumerate(tqdm(data_loader)):
             batch_samples['true_states'] = batch_samples['true_states'].to(params.rank)
             batch_samples['odometry'] = batch_samples['odometry'].to(params.rank)
             batch_samples['global_map'] = batch_samples['global_map'].to(params.rank)
@@ -139,16 +151,17 @@ def run_training(rank, params):
                 elif params.use_loss == 'dpf_loss':
                     loss = seg_losses['dpf_loss']
 
-                loss.backward()
+                if not params.eval:
+                    loss.backward()
 
-                # visualize gradient flow
-                # pf.plot_grad_flow(pf_cell.named_parameters())
+                    # visualize gradient flow
+                    # pf.plot_grad_flow(pf_cell.named_parameters())
 
-                # update parameters based on gradients
-                optimizer.step()
+                    # update parameters based on gradients
+                    optimizer.step()
 
-                # cleat gradients
-                optimizer.zero_grad()
+                    # cleat gradients
+                    optimizer.zero_grad()
 
                 # continue with previous episode state for same trajectory
                 # detach() since backprop only to current segment
@@ -169,129 +182,49 @@ def run_training(rank, params):
                 b_loss.append(t_loss)
                 b_mse_last.append(t_mse_last)
 
-                # print('train epoch: {0:05d}, batch: {1:05d}, b_loss: {2:03.3f}, mse_last: {3:03.3f}'.format(epoch, batch_idx, t_loss, t_mse_last))
-                writer.add_scalars('epoch-{0:03d}_train_stats'.format(epoch), {
-                    't_loss': t_loss,
-                    't_mse_last': t_mse_last
-                }, batch_idx)
+                if not params.eval:
+                    # print('train epoch: {0:05d}, batch: {1:05d}, b_loss: {2:03.3f}, mse_last: {3:03.3f}'.format(epoch, batch_idx, t_loss, t_mse_last))
+                    writer.add_scalars('epoch-{0:03d}_train_stats'.format(epoch), {
+                        't_loss': t_loss,
+                        't_mse_last': t_mse_last
+                    }, batch_idx)
+                else:
+                    # print('train epoch: {0:05d}, batch: {1:05d}, b_loss: {2:03.3f}, mse_last: {3:03.3f}'.format(epoch, batch_idx, t_loss, t_mse_last))
+                    writer.add_scalars('epoch-{0:03d}_eval_stats'.format(epoch), {
+                        't_loss': t_loss,
+                        't_mse_last': t_mse_last
+                    }, batch_idx)
 
         # log per epoch mean stats (only for gpu:0 or cpu)
         if rank == torch.device('cpu') or rank == 0:
-            print('train epoch: {0:05d}, mean_loss: {1:03.3f}, mean_mse_last: {2:03.3f}'.format(epoch, np.mean(b_loss), np.mean(b_mse_last)))
-            writer.add_scalars('train_stats', {
-                    'mean_loss': np.mean(b_loss),
-                    'mean_mse_last': np.mean(b_mse_last),
-            }, epoch)
+            if not params.eval:
+                print('train epoch: {0:05d}, mean_loss: {1:03.3f}, mean_mse_last: {2:03.3f}'.format(epoch, np.mean(b_loss), np.mean(b_mse_last)))
+                writer.add_scalars('train_stats', {
+                        'mean_loss': np.mean(b_loss),
+                        'mean_mse_last': np.mean(b_mse_last),
+                }, epoch)
+            else:
+                print('eval epoch: {0:05d}, mean_loss: {1:03.3f}, mean_mse_last: {2:03.3f}'.format(epoch, np.mean(b_loss), np.mean(b_mse_last)))
+                writer.add_scalars('eval_stats', {
+                        'mean_loss': np.mean(b_loss),
+                        'mean_mse_last': np.mean(b_mse_last),
+                }, epoch)
 
         # save (only for gpu:0 or cpu)
-        file_name = 'train_models/' + 'pfnet_train_eps_{0:05d}.pth'.format(epoch)
+        if params.eval:
+            file_name = 'eval_models/' + 'pfnet_eval_eps_{0:03.3f}.pth'.format(np.mean(b_loss))
+        else:
+            file_name = 'train_models/' + 'pfnet_train_eps_{0:05d}.pth'.format(epoch)
         if rank == torch.device('cpu'):
             save(model, file_name)
         elif rank == 0:
             save(model.module, file_name)
     cleanup()
 
-    print('training finished')
-
-def run_validation(rank, params):
-    print(f"Validating on GPU rank {rank}.")
-
-    # create model and move it to GPU with id rank
-    if rank != torch.device('cpu'):
-        setup(rank, params.world_size)
-        torch.cuda.set_device(rank)
-    model = pf.PFCell(params).to(rank)
-    model = load(model, params.checkpoint)
-    params.rank = rank
-
-    if rank != torch.device('cpu'):
-        # wrap the model
-        model = DDP(model, device_ids=[rank], find_unused_parameters=True)
-
-    # data loader
-    composed = transforms.Compose([
-                pf.ToTensor(),
-    ])
-    valid_dataset = pf.House3DTrajDataset(params, 'valid', transform=composed)
-    valid_loader = DataLoader(valid_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
-    print(f'validation file: {params.valid_file} has {len(valid_dataset)} records')
-
-    # iterate over num_valid_epochs
-    for epoch in range(params.num_valid_epochs):
-        b_loss = []
-        b_mse_last = []
-        model.eval()
-        # iterate over num_batches
-        for batch_idx, batch_samples in enumerate(tqdm(valid_loader)):
-            true_states = batch_samples['true_states'].to(params.rank)
-            odometries = batch_samples['odometry'].to(params.rank)
-            global_maps = batch_samples['global_map'].to(params.rank)
-            observations = batch_samples['observation'].to(params.rank)
-            init_particle_states = batch_samples['init_particles'].to(params.rank)
-
-            trajlen = params.trajlen
-            batch_size, num_particles = init_particle_states.shape[:2]
-            init_particle_weights = torch.full((batch_size, num_particles), np.log(1.0/num_particles)).to(params.rank)
-
-            # start with episode trajectory state with init particles and weights
-            state = init_particle_states, init_particle_weights
-
-            t_particle_states = []
-            t_particle_weights = []
-            # iterate over trajectory_length
-            for traj in range(trajlen):
-                obs = observations[:, traj, :, :, :]
-                odom = odometries[:, traj, :]
-                inputs = obs, odom, global_maps
-
-                output, state = model(inputs, state)
-
-                t_particle_states.append(output[0].unsqueeze(1))
-                t_particle_weights.append(output[1].unsqueeze(1))
-
-            t_particle_states = torch.cat(t_particle_states, axis=1)
-            t_particle_weights = torch.cat(t_particle_weights, axis=1)
-
-            eps_outputs = t_particle_states, t_particle_weights
-
-            losses = loss_fn(eps_outputs, true_states, params)
-            if params.use_loss == 'pfnet_loss':
-                t_loss = losses['pfnet_loss'].item()
-            elif params.use_loss == 'dpf_loss':
-                t_loss = losses['dpf_loss'].item()
-
-            # MSE at end of episode
-            lin_weights = torch.nn.functional.softmax(eps_outputs[1][:, -1, :], dim=-1)
-            l_mean_state = torch.sum(torch.mul(eps_outputs[0][:, -1, :, :], lin_weights[:, :, None]), dim=1)
-            l_true_state = true_states[:, -1, :]
-            rescales = [params.map_pixel_in_meters, params.map_pixel_in_meters, 0.36]
-            t_mse_last = torch.mean(compute_sq_distance(l_mean_state, l_true_state, rescales)).item()
-
-            # log per epoch batch stats (only for gpu:0 or cpu)
-            if rank == torch.device('cpu') or rank == 0:
-                b_loss.append(t_loss)
-                b_mse_last.append(t_mse_last)
-
-                # print(' eval epoch: {0:05d}, batch: {1:05d}, b_loss: {2:03.3f}, mse_last: {3:03.3f}'.format(epoch, batch_idx, t_loss, t_mse_last))
-                writer.add_scalars('epoch-{0:03d}_eval_stats'.format(epoch), {
-                    't_loss': t_loss,
-                    't_mse_last': t_mse_last
-                }, batch_idx)
-
-        # log per epoch mean stats (only for gpu:0 or cpu)
-        if rank == torch.device('cpu') or rank == 0:
-            print(' eval epoch: {0:05d}, mean_loss: {1:03.3f}, mean_mse_last: {2:03.3f}'.format(epoch, np.mean(b_loss), np.mean(b_mse_last)))
-            writer.add_scalars('train_stats', {
-                    'mean_loss': np.mean(b_loss),
-                    'mean_mse_last': np.mean(b_mse_last),
-            }, epoch)
-
-        # save (only for gpu:0 or cpu)
-        file_name = 'eval_models/' + 'pfnet_eval_eps_{0:03.3f}.pth'.format(np.mean(b_loss))
-        if rank == torch.device('cpu'):
-            save(model, file_name)
-        elif rank == 0:
-            save(model.module, file_name)
+    if not params.eval:
+        print('training finished')
+    else:
+        print('training finished')
 
 def loss_fn(outputs, true_states, params):
     particle_states, particle_weights = outputs
@@ -429,15 +362,9 @@ if __name__ == '__main__':
 
     if use_cuda:
         # multi-process run
-        print(f'Available GPUs: {os.environ["CUDA_VISIBLE_DEVICES"]}')
-        if not params.eval:
-            mp.spawn(run_training, nprocs=params.n_gpu, args=(params,))
-        else:
-            mp.spawn(run_validation, nprocs=params.n_gpu, args=(params,))
+        print(f'Avaialble GPUs: cuda:{os.environ["CUDA_VISIBLE_DEVICES"]}')
+        mp.spawn(run_pfnet, nprocs=params.n_gpu, args=(params,))
     else:
         # normal run
         rank = torch.device('cpu')
-        if not params.eval:
-            run_training(rank, params)
-        else:
-            run_validation(rank, params)
+        run_pfnet(rank, params)
