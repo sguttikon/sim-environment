@@ -7,6 +7,7 @@ from torchvision import transforms
 import torch.multiprocessing as mp
 import torch.distributed as dist
 from pathlib import Path
+from tqdm import tqdm
 import numpy as np
 import argparse
 import random
@@ -96,7 +97,7 @@ def run_training(rank, params):
         b_mse_last = []
         model.train()
         # iterate over num_batches
-        for batch_idx, batch_samples in enumerate(train_loader):
+        for batch_idx, batch_samples in enumerate(tqdm(train_loader)):
             batch_samples['true_states'] = batch_samples['true_states'].to(params.rank)
             batch_samples['odometry'] = batch_samples['odometry'].to(params.rank)
             batch_samples['global_map'] = batch_samples['global_map'].to(params.rank)
@@ -172,7 +173,7 @@ def run_training(rank, params):
                 b_loss.append(t_loss)
                 b_mse_last.append(t_mse_last)
 
-                print('train epoch: {0:05d}, batch: {1:05d}, b_loss: {2:03.3f}, mse_last: {3:03.3f}'.format(epoch, batch_idx, t_loss, t_mse_last))
+                # print('train epoch: {0:05d}, batch: {1:05d}, b_loss: {2:03.3f}, mse_last: {3:03.3f}'.format(epoch, batch_idx, t_loss, t_mse_last))
                 writer.add_scalars('epoch-{0:03d}_train_stats'.format(epoch), {
                     't_loss': t_loss,
                     't_mse_last': t_mse_last
@@ -208,31 +209,48 @@ def run_validation(model, valid_loader, params):
         b_mse_last = []
         model.eval()
         # iterate over num_batches
-        for batch_idx, batch_samples in enumerate(valid_loader):
-            episode_batch = {}
-            episode_batch['true_states'] = batch_samples['true_states'].to(params.rank)
-            episode_batch['odometry'] = batch_samples['odometry'].to(params.rank)
-            episode_batch['global_map'] = batch_samples['global_map'].to(params.rank)
-            episode_batch['observation'] = batch_samples['observation'].to(params.rank)
-            episode_batch['particle_states'] = batch_samples['init_particles'].to(params.rank)
+        for batch_idx, batch_samples in enumerate(tqdm(valid_loader)):
+            true_states = batch_samples['true_states'].to(params.rank)
+            odometries = batch_samples['odometry'].to(params.rank)
+            global_maps = batch_samples['global_map'].to(params.rank)
+            observations = batch_samples['observation'].to(params.rank)
+            init_particle_states = batch_samples['init_particles'].to(params.rank)
 
-            batch_size, num_particles = episode_batch['particle_states'].shape[:2]
-            episode_batch['particle_weights'] = torch.full((batch_size, num_particles), np.log(1.0/num_particles)).to(params.rank)
+            trajlen = params.trajlen
+            batch_size, num_particles = init_particle_states.shape[:2]
+            init_particle_weights = torch.full((batch_size, num_particles), np.log(1.0/num_particles)).to(params.rank)
 
-            #HACK validating on entire trajectory instead of running shorter segments
-            eps_outputs, _ = run_episode(model, episode_batch)
+            # start with episode trajectory state with init particles and weights
+            state = init_particle_states, init_particle_weights
 
-            labels = episode_batch['true_states']
-            losses = loss_fn(eps_outputs, labels, params)
+            t_particle_states = []
+            t_particle_weights = []
+            # iterate over trajectory_length
+            for traj in range(trajlen):
+                obs = observations[:, traj, :, :, :]
+                odom = odometries[:, traj, :]
+                inputs = obs, odom, global_maps
+
+                output, state = model(inputs, state)
+
+                t_particle_states.append(output[0].unsqueeze(1))
+                t_particle_weights.append(output[1].unsqueeze(1))
+
+            t_particle_states = torch.cat(t_particle_states, axis=1)
+            t_particle_weights = torch.cat(t_particle_weights, axis=1)
+
+            eps_outputs = t_particle_states, t_particle_weights
+
+            losses = loss_fn(eps_outputs, true_states, params)
             if params.use_loss == 'pfnet_loss':
                 t_loss = losses['pfnet_loss'].item()
             elif params.use_loss == 'dpf_loss':
                 t_loss = losses['dpf_loss'].item()
 
             # MSE at end of episode
-            lin_weights = torch.nn.functional.softmax(episode_batch['particle_weights'], dim=-1)
-            l_mean_state = torch.sum(torch.mul(episode_batch['particle_states'][:, :, :], lin_weights[:, :, None]), dim=1)
-            l_true_state = labels[:, -1, :]
+            lin_weights = torch.nn.functional.softmax(eps_outputs[1][:, -1, :], dim=-1)
+            l_mean_state = torch.sum(torch.mul(eps_outputs[0][:, -1, :, :], lin_weights[:, :, None]), dim=1)
+            l_true_state = true_states[:, -1, :]
             rescales = [params.map_pixel_in_meters, params.map_pixel_in_meters, 0.36]
             t_mse_last = torch.mean(compute_sq_distance(l_mean_state, l_true_state, rescales)).item()
 
@@ -241,7 +259,7 @@ def run_validation(model, valid_loader, params):
                 b_loss.append(t_loss)
                 b_mse_last.append(t_mse_last)
 
-                print(' eval epoch: {0:05d}, batch: {1:05d}, b_loss: {2:03.3f}, mse_last: {3:03.3f}'.format(epoch, batch_idx, t_loss, t_mse_last))
+                # print(' eval epoch: {0:05d}, batch: {1:05d}, b_loss: {2:03.3f}, mse_last: {3:03.3f}'.format(epoch, batch_idx, t_loss, t_mse_last))
                 writer.add_scalars('epoch-{0:03d}_eval_stats'.format(epoch), {
                     't_loss': t_loss,
                     't_mse_last': t_mse_last
