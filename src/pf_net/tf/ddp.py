@@ -33,6 +33,7 @@ def run_episode(model, episode_batch):
 
     t_particle_states = []
     t_particle_weights = []
+    t_n_eff = []
 
     # iterate over shoter segment_length
     seglen = observations.shape[1]
@@ -45,11 +46,12 @@ def run_episode(model, episode_batch):
 
         t_particle_states.append(outputs[0].unsqueeze(1))
         t_particle_weights.append(outputs[1].unsqueeze(1))
+        t_n_eff.append(outputs[2])
 
     t_particle_states = torch.cat(t_particle_states, axis=1)
     t_particle_weights = torch.cat(t_particle_weights, axis=1)
 
-    eps_outputs = t_particle_states, t_particle_weights
+    eps_outputs = t_particle_states, t_particle_weights, t_n_eff
     eps_state = state
 
     return eps_outputs, eps_state
@@ -130,7 +132,7 @@ def run_pfnet(rank, params):
 
             # traj loss is sum of multiple seg loss
             t_loss = 0
-            t_neff = 0
+            t_neff = []
 
             # start each episode trajectory with init particles and weights state
             episode_batch = {}
@@ -175,7 +177,7 @@ def run_pfnet(rank, params):
                 episode_batch['particle_weights'] = eps_state[1].detach()
 
                 t_loss += loss.item()
-                t_neff += seg_losses['n_eff'].item()
+                t_neff.extend(eps_outputs[2])
 
             # MSE at end of episode
             lin_weights = torch.nn.functional.softmax(episode_batch['particle_weights'], dim=-1)
@@ -194,7 +196,6 @@ def run_pfnet(rank, params):
                 writer.add_scalars(f'epoch-{epoch:03d}_eval_stats' if params.eval else f'epoch-{epoch:03d}_train_stats', {
                     't_loss': t_loss,
                     't_mse_last': t_mse_last,
-                    't_neff': t_neff,
                 }, batch_idx)
 
         # log per epoch mean stats (only for gpu:0 or cpu)
@@ -203,7 +204,6 @@ def run_pfnet(rank, params):
             writer.add_scalars('eval_stats' if params.eval else 'train_stats', {
                     'mean_loss': np.mean(b_loss),
                     'mean_mse_last': np.mean(b_mse_last),
-                    'mean_n_eff': np.mean(b_n_eff),
             }, epoch)
 
         # save (only for gpu:0 or cpu)
@@ -215,7 +215,9 @@ def run_pfnet(rank, params):
             save(model, file_name)
         elif rank == 0:
             save(model.module, file_name)
-    cleanup()
+
+    if rank != torch.device('cpu'):
+        cleanup()
 
     if not params.eval:
         print('training finished')
@@ -223,7 +225,7 @@ def run_pfnet(rank, params):
         print('validation finished')
 
 def loss_fn(outputs, true_states, params):
-    particle_states, particle_weights = outputs
+    particle_states, particle_weights, _ = outputs
 
     lin_weights = torch.nn.functional.softmax(particle_weights, dim=-1)
 
@@ -260,7 +262,6 @@ def loss_fn(outputs, true_states, params):
     losses = {}
     losses['pfnet_loss'] = torch.mean(pfnet_loss)
     losses['dpf_loss'] = torch.mean(dpf_loss)
-    losses['n_eff'] = torch.mean(1 / torch.sum(torch.square(lin_weights), axis=2))
 
     return losses
 

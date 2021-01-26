@@ -879,12 +879,15 @@ class PFCell(nn.Module):
         lik = self.observation_update(global_maps, particle_states, observation)
         particle_weights = particle_weights + lik  # unnormalized
 
-        # resample
-        if self.params.resample:
+        # resample selectively based on neff < N/2 threshold
+        batch_size, num_particles = particle_states.shape[:2]
+        n_eff = self.calc_eff_particles(particle_weights)   # before resample
+        if self.params.resample and n_eff < (num_particles/2):
             particle_states, particle_weights = self.resample(particle_states, particle_weights)
+            n_eff = self.calc_eff_particles(particle_weights)   # after resample
 
         # construct output before motion update
-        outputs = particle_states, particle_weights
+        outputs = particle_states, particle_weights, n_eff
 
         # motion update
         particle_states = self.motion_update(particle_states, odometry)
@@ -893,6 +896,12 @@ class PFCell(nn.Module):
         state = particle_states, particle_weights
 
         return outputs, state
+
+    def calc_eff_particles(self, particle_weights):
+        # [batch_size, num_particles]
+        lin_weights = torch.nn.functional.softmax(particle_weights, dim=-1)
+        n_eff = torch.mean(1 / torch.sum(torch.square(lin_weights), axis=-1))
+        return n_eff.item()    # int
 
     def observation_update(self, global_maps, particle_states, observation):
         batch_size, num_particles = particle_states.shape[:2]
