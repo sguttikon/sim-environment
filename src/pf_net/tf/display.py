@@ -8,6 +8,7 @@ from matplotlib.patches import Arrow
 from torchvision import transforms
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+from pathlib import Path
 import numpy as np
 import argparse
 import random
@@ -34,14 +35,14 @@ def draw_robot(robot_plt, robot_state, clr):
     dx = length * np.cos(theta)
     dy = length * np.sin(theta)
     if 'robot' not in robot_plt:
-        robot_plt['robot'] = Wedge((x, y), radius, 0, 360, color=clr, alpha=.8)
+        robot_plt['robot'] = Wedge((x, y), radius, 0, 360, color=clr, alpha=.9)
         plt_ax.add_artist(robot_plt['robot'])
     else:
         robot_plt['robot'].set_center((x, y))
         # oldpose
         robot_plt['heading'].set_alpha(.0)
 
-    robot_plt['heading'] = Arrow(x, y, dx, dy, width=10, fc=clr, alpha=.8)
+    robot_plt['heading'] = Arrow(x, y, dx, dy, width=10, fc=clr, alpha=.9)
     plt_ax.add_artist(robot_plt['heading'])    # newpose
 
     return robot_plt
@@ -65,9 +66,9 @@ def visualize(params):
     composed = transforms.Compose([
                 pf.ToTensor(),
     ])
-    dataset = pf.House3DTrajDataset(params, 'valid', transform=composed)
+    dataset = pf.House3DTrajDataset(params, transform=composed)
     data_loader = DataLoader(dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
-    print(f'validation file: {params.valid_file} has {len(dataset)} records')
+    print(f'validation file: {params.data_file} has {len(dataset)} records')
 
     episode_batch = next(iter(data_loader))
 
@@ -118,13 +119,13 @@ def visualize(params):
 
         # plot true robot pose
         gt_state = true_state[0].detach().cpu().numpy()
-        gt_plt = draw_robot(gt_plt, gt_state, '#064b67')
+        gt_plt = draw_robot(gt_plt, gt_state, '#7B241C')
 
         # plot est robot pose
         lin_weights = torch.nn.functional.softmax(output[1], dim=-1)
         est_state = torch.sum(torch.mul(output[0][:, :, :], lin_weights[:, :, None]), dim=1)
         est_state = est_state[0].detach().cpu().numpy()
-        est_plt = draw_robot(est_plt, est_state, '#78097e')
+        est_plt = draw_robot(est_plt, est_state, '#515A5A')
         # print(np.linalg.norm(gt_state-est_state))
 
         # plot est pose particles
@@ -225,11 +226,13 @@ def str2bool(v):
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser()
 
+    argparser.add_argument('--data_file', type=str, default='../data/test.tfrecords', help='path to the training/validation .tfrecords')
+    argparser.add_argument('--eval', type=str2bool, nargs='?', const=True, default=True, help='validate network')
     argparser.add_argument('--checkpoint', type=str, default='./saved_models/pfnet_eps_00000.pth', help='load pretrained model *.pth checkpoint')
-    argparser.add_argument('--valid_file', type=str, default='../data/test.tfrecords', help='path to the validating .tfrecords')
-    argparser.add_argument('--num_valid_epochs', type=int, default=1, help='number of epochs to eval')
+    argparser.add_argument('--num_epochs', type=int, default=20, help='number of epochs to train/eval')
     argparser.add_argument('--resample', type=str2bool, nargs='?', const=True, default=False, help='use resampling during training')
     argparser.add_argument('--alpha_resample_ratio', type=float, default=0.5, help='alpha=0: uniform sampling (ignoring weights) and alpha=1: standard hard sampling (produces zero gradients)')
+    argparser.add_argument('--resample_threshold', type=float, default=0.5, help='resample_threshold=1 means resample every step and resample_threshold=0.01 means almost never')
     argparser.add_argument('--batch_size', type=int, default=1, help='batch size used for training')
     argparser.add_argument('--num_workers', type=int, default=0, help='workers used for data loading')
     argparser.add_argument('--num_particles', type=int, default=200, help='number of particles used for training')
@@ -248,6 +251,7 @@ if __name__ == '__main__':
     params = argparser.parse_args()
 
     params.map_pixel_in_meters = 0.02
+    assert 0.0 < params.resample_threshold <= 1.0
 
     # convert multi-input fileds to numpy arrays
     params.init_particles_std = np.array(params.init_particles_std, np.float32)
@@ -268,17 +272,20 @@ if __name__ == '__main__':
     else:
         params.rank = torch.device('cpu')
 
-    fig = plt.figure(figsize=(10, 10))
+    fig = plt.figure(figsize=(7, 7), dpi=200)
     plt_ax = fig.add_subplot(111)
     canvas = FigureCanvasAgg(fig)
 
     images = visualize(params)
 
     size = (images[0].shape[0], images[0].shape[1])
-    out = cv2.VideoWriter('output.avi', cv2.VideoWriter_fourcc(*'MPEG'), 20, size)
+    folder = './output/'
+    Path(folder).mkdir(parents=True, exist_ok=True)
+    out = cv2.VideoWriter(folder + 'result.avi', cv2.VideoWriter_fourcc(*'XVID'), 30, size)
 
     for i in range(len(images)):
         out.write(images[i])
+        cv2.imwrite(folder + f'result_img_{i}.png', images[i])
     out.release()
 
     #plt.show()

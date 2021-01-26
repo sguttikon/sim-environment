@@ -309,6 +309,7 @@ if __name__ == '__main__':
     argparser.add_argument('--num_epochs', type=int, default=20, help='number of epochs to train/eval')
     argparser.add_argument('--resample', type=str2bool, nargs='?', const=True, default=False, help='use resampling during training')
     argparser.add_argument('--alpha_resample_ratio', type=float, default=0.5, help='alpha=0: uniform sampling (ignoring weights) and alpha=1: standard hard sampling (produces zero gradients)')
+    argparser.add_argument('--resample_threshold', type=float, default=0.5, help='resample_threshold=1 means resample every step and resample_threshold=0.01 means almost never')
     argparser.add_argument('--batch_size', type=int, default=4, help='batch size used for training')
     argparser.add_argument('--num_workers', type=int, default=0, help='workers used for data loading')
     argparser.add_argument('--num_particles', type=int, default=30, help='number of particles used for training')
@@ -328,6 +329,7 @@ if __name__ == '__main__':
     params = argparser.parse_args()
 
     params.map_pixel_in_meters = 0.02
+    assert 0.0 < params.resample_threshold <= 1.0
 
     # convert multi-input fileds to numpy arrays
     params.init_particles_std = np.array(params.init_particles_std, np.float32)
