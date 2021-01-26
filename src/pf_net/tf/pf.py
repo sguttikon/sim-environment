@@ -882,7 +882,7 @@ class PFCell(nn.Module):
         # resample selectively based on neff < N/2 threshold
         batch_size, num_particles = particle_states.shape[:2]
         n_eff = self.calc_eff_particles(particle_weights)   # before resample
-        if self.params.resample and n_eff <= num_particles * self.params.selective_threshold:
+        if self.params.resample and n_eff <= num_particles * self.params.resample_threshold:
             particle_states, particle_weights = self.resample(particle_states, particle_weights)
             n_eff = self.calc_eff_particles(particle_weights)   # after resample
 

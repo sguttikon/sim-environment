@@ -272,7 +272,7 @@ if __name__ == '__main__':
     else:
         params.rank = torch.device('cpu')
 
-    fig = plt.figure(figsize=(7, 7), dpi=200)
+    fig = plt.figure(figsize=(7, 7), dpi=300)
     plt_ax = fig.add_subplot(111)
     canvas = FigureCanvasAgg(fig)
 
