@@ -102,6 +102,7 @@ def run_pfnet(rank, params):
     for epoch in range(params.num_epochs):
         b_loss = []
         b_mse_last = []
+        b_n_eff = []
 
         if not params.eval:
             model.train()
@@ -129,6 +130,7 @@ def run_pfnet(rank, params):
 
             # traj loss is sum of multiple seg loss
             t_loss = 0
+            t_neff = 0
 
             # start each episode trajectory with init particles and weights state
             episode_batch = {}
@@ -173,6 +175,7 @@ def run_pfnet(rank, params):
                 episode_batch['particle_weights'] = eps_state[1].detach()
 
                 t_loss += loss.item()
+                t_neff += seg_losses['n_eff'].item()
 
             # MSE at end of episode
             lin_weights = torch.nn.functional.softmax(episode_batch['particle_weights'], dim=-1)
@@ -185,11 +188,13 @@ def run_pfnet(rank, params):
             if rank == torch.device('cpu') or rank == 0:
                 b_loss.append(t_loss)
                 b_mse_last.append(t_mse_last)
+                b_n_eff.append(t_neff)
 
                 # print('train epoch: {0:05d}, batch: {1:05d}, b_loss: {2:03.3f}, mse_last: {3:03.3f}'.format(epoch, batch_idx, t_loss, t_mse_last))
                 writer.add_scalars(f'epoch-{epoch:03d}_eval_stats' if params.eval else f'epoch-{epoch:03d}_train_stats', {
                     't_loss': t_loss,
-                    't_mse_last': t_mse_last
+                    't_mse_last': t_mse_last,
+                    't_neff': t_neff,
                 }, batch_idx)
 
         # log per epoch mean stats (only for gpu:0 or cpu)
@@ -198,6 +203,7 @@ def run_pfnet(rank, params):
             writer.add_scalars('eval_stats' if params.eval else 'train_stats', {
                     'mean_loss': np.mean(b_loss),
                     'mean_mse_last': np.mean(b_mse_last),
+                    'mean_n_eff': np.mean(b_n_eff),
             }, epoch)
 
         # save (only for gpu:0 or cpu)
@@ -254,6 +260,7 @@ def loss_fn(outputs, true_states, params):
     losses = {}
     losses['pfnet_loss'] = torch.mean(pfnet_loss)
     losses['dpf_loss'] = torch.mean(dpf_loss)
+    losses['n_eff'] = torch.mean(1 / torch.sum(torch.square(lin_weights), axis=2))
 
     return losses
 
@@ -350,7 +357,7 @@ if __name__ == '__main__':
 
     if use_cuda:
         # multi-process run
-        print(f'Avaialble GPUs: cuda:{os.environ["CUDA_VISIBLE_DEVICES"]}')
+        print(f'Avaialble GPUs - cuda:{os.environ["CUDA_VISIBLE_DEVICES"]}')
         mp.spawn(run_pfnet, nprocs=params.n_gpu, args=(params,))
     else:
         # normal run
