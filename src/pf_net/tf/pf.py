@@ -24,7 +24,7 @@ np.set_printoptions(precision=5, suppress=True)
 
 class House3DTrajDataset(Dataset):
 
-    def __init__(self, params, type, transform=None):
+    def __init__(self, params, transform=None):
         self.params = params
 
         # build initial covariance matrix of particles, in pixels and radians
@@ -35,12 +35,7 @@ class House3DTrajDataset(Dataset):
 
         self.map_shape = [params.global_map_size[0], params.global_map_size[1]] + [1]
 
-        self.params.type = type
-        if type == 'train':
-            file = params.train_file
-        elif type == 'valid':
-            file = params.valid_file
-
+        file = params.data_file
         self.raw_dataset = tf.data.TFRecordDataset(file)
         # self.raw_dataset_itr = list(self.raw_dataset.as_numpy_iterator())
 

@@ -56,15 +56,16 @@ def run_episode(model, episode_batch):
 
 def run_pfnet(rank, params):
     if not params.eval:
-        print(f"Training on GPU rank {rank}.")
+        print(f'Training on GPU rank {rank}.')
     else:
-        print(f"Validating on GPU rank {rank}.")
+        print(f'Validating on GPU rank {rank}.')
 
     # create model and move it to GPU with id rank
     if rank != torch.device('cpu'):
         setup(rank, params.world_size)
-        torch.cuda.set_device(rank)
-    model = pf.PFCell(params).to(rank)
+        # torch.cuda.set_device(rank)
+    if not params.dataparallel:
+        model = pf.PFCell(params).to(rank)
     if params.eval:
         model = load(model, params.checkpoint)
 
@@ -76,26 +77,29 @@ def run_pfnet(rank, params):
 
     if rank != torch.device('cpu'):
         # wrap the model
-        model = DDP(model, device_ids=[rank], find_unused_parameters=True)
+        if params.dataparallel:
+            model = DDP(model, find_unused_parameters=True)
+        else:
+            model = DDP(model, device_ids=[rank], find_unused_parameters=True)
 
     # data loader
     composed = transforms.Compose([
                 pf.ToTensor(),
     ])
     if not params.eval:
-        train_dataset = pf.House3DTrajDataset(params, 'train', transform=composed)
+        train_dataset = pf.House3DTrajDataset(params, transform=composed)
         data_loader = DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
-        print(f'training file: {params.train_file} has {len(train_dataset)} records')
+        print(f'training file: {params.data_file} has {len(train_dataset)} records')
     else:
-        valid_dataset = pf.House3DTrajDataset(params, 'valid', transform=composed)
+        valid_dataset = pf.House3DTrajDataset(params, transform=composed)
         data_loader = DataLoader(valid_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
-        print(f'validation file: {params.valid_file} has {len(valid_dataset)} records')
+        print(f'validation file: {params.data_file} has {len(valid_dataset)} records')
 
     trajlen, seglen = params.trajlen, params.seglen
     assert trajlen % seglen == 0
     num_segments = trajlen // seglen
     # iterate over num_train_epochs
-    for epoch in range(params.num_train_epochs):
+    for epoch in range(params.num_epochs):
         b_loss = []
         b_mse_last = []
 
@@ -182,33 +186,19 @@ def run_pfnet(rank, params):
                 b_loss.append(t_loss)
                 b_mse_last.append(t_mse_last)
 
-                if not params.eval:
-                    # print('train epoch: {0:05d}, batch: {1:05d}, b_loss: {2:03.3f}, mse_last: {3:03.3f}'.format(epoch, batch_idx, t_loss, t_mse_last))
-                    writer.add_scalars('epoch-{0:03d}_train_stats'.format(epoch), {
-                        't_loss': t_loss,
-                        't_mse_last': t_mse_last
-                    }, batch_idx)
-                else:
-                    # print('train epoch: {0:05d}, batch: {1:05d}, b_loss: {2:03.3f}, mse_last: {3:03.3f}'.format(epoch, batch_idx, t_loss, t_mse_last))
-                    writer.add_scalars('epoch-{0:03d}_eval_stats'.format(epoch), {
-                        't_loss': t_loss,
-                        't_mse_last': t_mse_last
-                    }, batch_idx)
+                # print('train epoch: {0:05d}, batch: {1:05d}, b_loss: {2:03.3f}, mse_last: {3:03.3f}'.format(epoch, batch_idx, t_loss, t_mse_last))
+                writer.add_scalars(f'epoch-{epoch:03d}_eval_stats' if params.eval else f'epoch-{epoch:03d}_train_stats', {
+                    't_loss': t_loss,
+                    't_mse_last': t_mse_last
+                }, batch_idx)
 
         # log per epoch mean stats (only for gpu:0 or cpu)
         if rank == torch.device('cpu') or rank == 0:
-            if not params.eval:
-                print('train epoch: {0:05d}, mean_loss: {1:03.3f}, mean_mse_last: {2:03.3f}'.format(epoch, np.mean(b_loss), np.mean(b_mse_last)))
-                writer.add_scalars('train_stats', {
-                        'mean_loss': np.mean(b_loss),
-                        'mean_mse_last': np.mean(b_mse_last),
-                }, epoch)
-            else:
-                print('eval epoch: {0:05d}, mean_loss: {1:03.3f}, mean_mse_last: {2:03.3f}'.format(epoch, np.mean(b_loss), np.mean(b_mse_last)))
-                writer.add_scalars('eval_stats', {
-                        'mean_loss': np.mean(b_loss),
-                        'mean_mse_last': np.mean(b_mse_last),
-                }, epoch)
+            print(f'epoch: {epoch:05d}, mean_loss: {np.mean(b_loss):03.3f}, mean_mse_last: {np.mean(b_mse_last):03.3f}')
+            writer.add_scalars('eval_stats' if params.eval else 'train_stats', {
+                    'mean_loss': np.mean(b_loss),
+                    'mean_mse_last': np.mean(b_mse_last),
+            }, epoch)
 
         # save (only for gpu:0 or cpu)
         if params.eval:
@@ -224,7 +214,7 @@ def run_pfnet(rank, params):
     if not params.eval:
         print('training finished')
     else:
-        print('training finished')
+        print('validation finished')
 
 def loss_fn(outputs, true_states, params):
     particle_states, particle_weights = outputs
@@ -305,12 +295,10 @@ def str2bool(v):
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser()
 
-    argparser.add_argument('--train_file', type=str, default='../data/valid.tfrecords', help='path to the training .tfrecords')
-    argparser.add_argument('--valid_file', type=str, default='../data/test.tfrecords', help='path to the validating .tfrecords')
+    argparser.add_argument('--data_file', type=str, default='../data/valid.tfrecords', help='path to the training/validation .tfrecords')
     argparser.add_argument('--eval', type=str2bool, nargs='?', const=True, default=False, help='validate network')
     argparser.add_argument('--checkpoint', type=str, default='./saved_models/pfnet_eps_00000.pth', help='load pretrained model *.pth checkpoint')
-    argparser.add_argument('--num_train_epochs', type=int, default=20, help='number of epochs to train')
-    argparser.add_argument('--num_valid_epochs', type=int, default=20, help='number of epochs to eval')
+    argparser.add_argument('--num_epochs', type=int, default=20, help='number of epochs to train/eval')
     argparser.add_argument('--resample', type=str2bool, nargs='?', const=True, default=False, help='use resampling during training')
     argparser.add_argument('--alpha_resample_ratio', type=float, default=0.5, help='alpha=0: uniform sampling (ignoring weights) and alpha=1: standard hard sampling (produces zero gradients)')
     argparser.add_argument('--batch_size', type=int, default=4, help='batch size used for training')
