@@ -193,6 +193,7 @@ class House3DTrajDataset(Dataset):
                 particles[sample_i] = particle
                 sample_i += 1
 
+        particles[:, 2] = normalize(particles[:, 2])
         return particles
 
     def bounding_box(self, img):
@@ -278,6 +279,7 @@ def sample_motion_odometry(old_pose, odometry):
     x1, y1, th1 = old_pose
     odom_x, odom_y, odom_th = odometry
 
+    th1 = normalize(th1)
     sin = np.sin(th1)
     cos = np.cos(th1)
 
@@ -294,10 +296,13 @@ def calc_odometry(old_pose, new_pose):
 
     abs_x = (x2 - x1)
     abs_y = (y2 - y1)
+
+    th1 = normalize(th1)
     sin = np.sin(th1)
     cos = np.cos(th1)
 
-    odom_th = wrap_angle(th2 - th1)
+    th2 = normalize(th2)
+    odom_th = normalize(th2 - th1)
     odom_x = cos * abs_x + sin * abs_y
     odom_y = cos * abs_y - sin * abs_x
 
@@ -362,7 +367,7 @@ class TransitionModel(nn.Module):
         noise_th = torch.normal(mean=0.0, std=1.0, size=part_th.shape).to(device) * rotation_std
 
         # add orientation noise before translation
-        part_th = part_th + noise_th
+        part_th = normalize(part_th + noise_th, isTensor=True)
 
         cos_th = torch.cos(part_th)
         sin_th = torch.sin(part_th)
@@ -373,7 +378,7 @@ class TransitionModel(nn.Module):
         delta_x = delta_x + torch.normal(mean=0.0, std=1.0, size=delta_x.shape).to(device) * translation_std
         delta_y = delta_y + torch.normal(mean=0.0, std=1.0, size=delta_y.shape).to(device) * translation_std
 
-        return torch.stack([part_x + delta_x, part_y + delta_y, part_th + delta_th], axis=-1)
+        return torch.stack([part_x + delta_x, part_y + delta_y, normalize(part_th + delta_th, isTensor=True)], axis=-1)
 
 class ObservationModel(nn.Module):
 

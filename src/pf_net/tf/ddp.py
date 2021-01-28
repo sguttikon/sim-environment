@@ -239,11 +239,10 @@ def loss_fn(outputs, true_states, params):
     # coordinate loss component: (x-x')^2 + (y-y')^2
     loss_coords = torch.sum(torch.square(coord_diffs), axis=2)
 
-    true_orients = true_states[:, :, 2]
-    orient_diffs = particle_states[:, :, :, 2] - true_orients[:, :, None]
-
     # normalize between [-pi, +pi]
-    orient_diffs = pf.normalize(orient_diffs, isTensor=True)
+    true_orients = true_states[:, :, 2]
+    orient_diffs = pf.normalize(particle_states[:, :, :, 2], isTensor=True) - \
+                    pf.normalize(true_orients[:, :, None], isTensor=True)
 
     # orintation loss component: (sum_k[(theta_k-theta')*weight_k] )^2
     loss_orient = torch.square(torch.sum(orient_diffs * lin_weights, axis=2))

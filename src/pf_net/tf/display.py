@@ -227,9 +227,8 @@ if __name__ == '__main__':
     argparser = argparse.ArgumentParser()
 
     argparser.add_argument('--data_file', type=str, default='../data/test.tfrecords', help='path to the training/validation .tfrecords')
-    argparser.add_argument('--eval', type=str2bool, nargs='?', const=True, default=True, help='validate network')
     argparser.add_argument('--checkpoint', type=str, default='./saved_models/pfnet_eps_00000.pth', help='load pretrained model *.pth checkpoint')
-    argparser.add_argument('--num_epochs', type=int, default=20, help='number of epochs to train/eval')
+    argparser.add_argument('--num_epochs', type=int, default=20, help='number of epochs to eval')
     argparser.add_argument('--resample', type=str2bool, nargs='?', const=True, default=False, help='use resampling during training')
     argparser.add_argument('--alpha_resample_ratio', type=float, default=0.5, help='alpha=0: uniform sampling (ignoring weights) and alpha=1: standard hard sampling (produces zero gradients)')
     argparser.add_argument('--resample_threshold', type=float, default=0.5, help='resample_threshold=1 means resample every step and resample_threshold=0.01 means almost never')
