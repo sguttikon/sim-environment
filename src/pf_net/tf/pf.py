@@ -719,8 +719,8 @@ class SpatialTransformerNet(nn.Module):
         total_samples = batch_size * num_particles
         flat_states = torch.reshape(particle_states, (total_samples, 3))
 
-        zero = torch.full((total_samples, ), 0).to(device)
-        one = torch.full((total_samples, ), 1).to(device)
+        zero = torch.full((total_samples, ), 0, dtype=torch.float64).to(device)
+        one = torch.full((total_samples, ), 1, dtype=torch.float64).to(device)
 
         input_map_shape = global_maps.shape
         # affine transformation
@@ -743,8 +743,8 @@ class SpatialTransformerNet(nn.Module):
 
         # 3. optional scale down the map
         window_scaler = 8
-        scale_x = torch.full((total_samples, ), float(self.params.local_map_size[0] * window_scaler) * width_inverse).to(device)
-        scale_y = torch.full((total_samples, ), float(self.params.local_map_size[1] * window_scaler) * height_inverse).to(device)
+        scale_x = torch.full((total_samples, ), float(self.params.local_map_size[0] * window_scaler) * width_inverse, dtype=torch.float64).to(device)
+        scale_y = torch.full((total_samples, ), float(self.params.local_map_size[1] * window_scaler) * height_inverse, dtype=torch.float64).to(device)
         scalem = torch.stack([scale_x, zero, zero, zero, scale_y, zero, zero, zero, one], axis=1)
         scalem = torch.reshape(scalem, (total_samples, 3, 3))
 
