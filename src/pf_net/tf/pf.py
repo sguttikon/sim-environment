@@ -360,11 +360,13 @@ class TransitionModel(nn.Module):
         rotation_std = self.params.transition_std[1]  # in radians
 
         part_x, part_y, part_th = torch.unbind(particle_states, dim=-1)
+        part_th = normalize(part_th, isTensor=True)
 
         odometry = odometry.unsqueeze(1)
         odom_x, odom_y, odom_th = torch.unbind(odometry, dim=-1)
+        odom_th = normalize(odom_th, isTensor=True)
 
-        noise_th = torch.normal(mean=0.0, std=1.0, size=part_th.shape).to(device) * rotation_std
+        noise_th = normalize(torch.normal(mean=0.0, std=1.0, size=part_th.shape).to(device) * rotation_std, isTensor=True)
 
         # add orientation noise before translation
         part_th = normalize(part_th + noise_th, isTensor=True)
