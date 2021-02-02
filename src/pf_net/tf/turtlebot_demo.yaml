@@ -15,7 +15,7 @@ object_randomization_freq: null
 
 # robot
 robot: Turtlebot
-is_discrete: false
+is_discrete: true
 velocity: 1.0
 
 # task
