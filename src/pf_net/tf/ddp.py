@@ -16,8 +16,6 @@ import pf
 import os
 
 np.set_printoptions(precision=5, suppress=True)
-Path("train_models").mkdir(parents=True, exist_ok=True)
-Path("eval_models").mkdir(parents=True, exist_ok=True)
 
 # logger
 writer = SummaryWriter()
@@ -56,11 +54,9 @@ def run_episode(model, episode_batch):
 
     return eps_outputs, eps_state
 
-def run_pfnet(rank, params):
-    if not params.eval:
-        print(f'Training on GPU rank {rank}.')
-    else:
-        print(f'Validating on GPU rank {rank}.')
+def run_pfnet_training(rank, params):
+    print(f'Training on GPU rank {rank}.')
+    Path("train_models").mkdir(parents=True, exist_ok=True)
 
     # create model and move it to GPU with id rank
     if rank != torch.device('cpu'):
@@ -68,8 +64,6 @@ def run_pfnet(rank, params):
         # torch.cuda.set_device(rank)
     if not params.dataparallel:
         model = pf.PFCell(params).to(rank)
-    if params.eval:
-        model = load(model, params.checkpoint)
 
     params.rank = rank
 
@@ -88,14 +82,9 @@ def run_pfnet(rank, params):
     composed = transforms.Compose([
                 pf.ToTensor(),
     ])
-    if not params.eval:
-        train_dataset = pf.House3DTrajDataset(params, transform=composed)
-        data_loader = DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
-        print(f'training file: {params.data_file} has {len(train_dataset)} records')
-    else:
-        valid_dataset = pf.House3DTrajDataset(params, transform=composed)
-        data_loader = DataLoader(valid_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
-        print(f'validation file: {params.data_file} has {len(valid_dataset)} records')
+    train_dataset = pf.House3DTrajDataset(params, transform=composed)
+    data_loader = DataLoader(train_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
+    print(f'training file: {params.data_file} has {len(train_dataset)} records')
 
     trajlen, seglen = params.trajlen, params.seglen
     assert trajlen % seglen == 0
@@ -106,10 +95,7 @@ def run_pfnet(rank, params):
         b_mse_last = []
         b_n_eff = []
 
-        if not params.eval:
-            model.train()
-        else:
-            model.eval()
+        model.train()
 
         # iterate over num_batches
         for batch_idx, batch_samples in enumerate(tqdm(data_loader)):
@@ -159,17 +145,16 @@ def run_pfnet(rank, params):
                 elif params.use_loss == 'dpf_loss':
                     loss = seg_losses['dpf_loss']
 
-                if not params.eval:
-                    loss.backward()
+                loss.backward()
 
-                    # visualize gradient flow
-                    # pf.plot_grad_flow(pf_cell.named_parameters())
+                # visualize gradient flow
+                # pf.plot_grad_flow(pf_cell.named_parameters())
 
-                    # update parameters based on gradients
-                    optimizer.step()
+                # update parameters based on gradients
+                optimizer.step()
 
-                    # cleat gradients
-                    optimizer.zero_grad()
+                # cleat gradients
+                optimizer.zero_grad()
 
                 # continue with previous episode state for same trajectory
                 # detach() since backprop only to current segment
@@ -193,7 +178,7 @@ def run_pfnet(rank, params):
                 b_n_eff.append(t_neff)
 
                 # print('train epoch: {0:05d}, batch: {1:05d}, b_loss: {2:03.3f}, mse_last: {3:03.3f}'.format(epoch, batch_idx, t_loss, t_mse_last))
-                writer.add_scalars(f'epoch-{epoch:03d}_eval_stats' if params.eval else f'epoch-{epoch:03d}_train_stats', {
+                writer.add_scalars(f'epoch-{epoch:03d}_train_stats', {
                     't_loss': t_loss,
                     't_mse_last': t_mse_last,
                 }, batch_idx)
@@ -201,16 +186,13 @@ def run_pfnet(rank, params):
         # log per epoch mean stats (only for gpu:0 or cpu)
         if rank == torch.device('cpu') or rank == 0:
             print(f'epoch: {epoch:05d}, mean_loss: {np.mean(b_loss):03.3f}, mean_mse_last: {np.mean(b_mse_last):03.3f}')
-            writer.add_scalars('eval_stats' if params.eval else 'train_stats', {
+            writer.add_scalars('train_stats', {
                     'mean_loss': np.mean(b_loss),
                     'mean_mse_last': np.mean(b_mse_last),
             }, epoch)
 
         # save (only for gpu:0 or cpu)
-        if params.eval:
-            file_name = 'eval_models/' + 'pfnet_eval_eps_{0:03.3f}.pth'.format(np.mean(b_loss))
-        else:
-            file_name = 'train_models/' + 'pfnet_train_eps_{0:05d}.pth'.format(epoch)
+        file_name = 'train_models/' + 'pfnet_train_eps_{0:05d}.pth'.format(epoch)
         if rank == torch.device('cpu'):
             save(model, file_name)
         elif rank == 0:
@@ -219,10 +201,162 @@ def run_pfnet(rank, params):
     if rank != torch.device('cpu'):
         cleanup()
 
-    if not params.eval:
-        print('training finished')
-    else:
-        print('validation finished')
+    print('training finished')
+
+def run_pfnet_validation(rank, params):
+    print(f'Validating on GPU rank {rank}.')
+    Path("eval_models").mkdir(parents=True, exist_ok=True)
+
+    # create model and move it to GPU with id rank
+    if rank != torch.device('cpu'):
+        setup(rank, params.world_size)
+        # torch.cuda.set_device(rank)
+    if not params.dataparallel:
+        model = pf.PFCell(params).to(rank)
+    model = load(model, params.checkpoint)
+    params.rank = rank
+
+    # define optimizer
+    model_params =  list(model.parameters())
+    optimizer = torch.optim.Adam(model_params, lr=2e-4, weight_decay=0.01)
+
+    if rank != torch.device('cpu'):
+        # wrap the model
+        if params.dataparallel:
+            model = DDP(model, find_unused_parameters=True)
+        else:
+            model = DDP(model, device_ids=[rank], find_unused_parameters=True)
+
+    # data loader
+    composed = transforms.Compose([
+                pf.ToTensor(),
+    ])
+    valid_dataset = pf.House3DTrajDataset(params, transform=composed)
+    data_loader = DataLoader(valid_dataset, batch_size=params.batch_size, shuffle=True, num_workers=params.num_workers)
+    print(f'validation file: {params.data_file} has {len(valid_dataset)} records')
+
+    trajlen = params.trajlen
+    # iterate over num_train_epochs
+    for epoch in range(params.num_epochs):
+        b_loss = []
+        b_mse_last = []
+        b_n_eff = []
+        b_mse_overall = []
+        b_success = []
+
+        model.eval()
+        with torch.no_grad():
+            # iterate over num_batches
+            for batch_idx, batch_samples in enumerate(tqdm(data_loader)):
+                batch_samples['true_states'] = batch_samples['true_states'].to(params.rank)
+                batch_samples['odometry'] = batch_samples['odometry'].to(params.rank)
+                batch_samples['global_map'] = batch_samples['global_map'].to(params.rank)
+                batch_samples['observation'] = batch_samples['observation'].to(params.rank)
+
+                batch_size, num_particles = batch_samples['init_particles'].shape[:2]
+                batch_samples['init_particles'] = batch_samples['init_particles'].to(params.rank)
+                batch_samples['init_particle_weights'] = torch.full((batch_size, num_particles), np.log(1.0/num_particles)).to(params.rank)
+
+                # sanity check
+                assert list(batch_samples['true_states'].shape)[1:] == [trajlen, 3]
+                assert list(batch_samples['odometry'].shape)[1:] == [trajlen, 3]
+                # assert list(batch_samples['global_map'].shape)[1:] == [1, 3000, 3000]
+                assert list(batch_samples['observation'].shape)[1:] == [trajlen, 3, 56, 56]
+                assert list(batch_samples['init_particles'].shape)[1:] == [num_particles, 3]
+                assert list(batch_samples['init_particle_weights'].shape)[1:] == [num_particles]
+
+                # traj loss is sum of multiple seg loss
+                t_loss = 0
+                t_neff = []
+
+                # start each episode trajectory with init particles and weights state
+                state = batch_samples['init_particles'], batch_samples['init_particle_weights']
+
+                t_particle_states = []
+                t_particle_weights = []
+                t_n_eff = []
+
+                global_maps = batch_samples['global_map']
+                for traj in range(trajlen):
+                    obs = batch_samples['observation'][:, traj, :, :, :]
+                    odom = batch_samples['odometry'][:, traj, :]
+                    inputs = obs, odom, global_maps
+
+                    outputs, state = model(inputs, state)
+
+                    t_particle_states.append(outputs[0].unsqueeze(1))
+                    t_particle_weights.append(outputs[1].unsqueeze(1))
+                    t_n_eff.append(outputs[2])
+
+                t_particle_states = torch.cat(t_particle_states, axis=1)
+                t_particle_weights = torch.cat(t_particle_weights, axis=1)
+
+                eps_outputs = t_particle_states, t_particle_weights, t_n_eff
+                eps_state = state
+
+                # [batch_size, trajlen, [num_particles], ..]
+                labels = batch_samples['true_states']
+                seg_losses = loss_fn(eps_outputs, labels, params)
+
+                if params.use_loss == 'pfnet_loss':
+                    loss = seg_losses['pfnet_loss']
+                elif params.use_loss == 'dpf_loss':
+                    loss = seg_losses['dpf_loss']
+
+                t_loss += loss.item()
+                t_neff.extend(eps_outputs[2])
+
+                all_distance2 = seg_losses['loss_coords'].detach().cpu().numpy()
+                t_mse_overall = np.mean(all_distance2)
+                t_successful = np.all(all_distance2[-trajlen//4:] < 1.0 ** 2)  # below 1 meter
+
+                # MSE at end of episode
+                lin_weights = torch.nn.functional.softmax(eps_state[1], dim=-1)
+                l_mean_state = torch.sum(torch.mul(eps_state[0][:, :, :], lin_weights[:, :, None]), dim=1)
+                l_true_state = labels[:, -1, :]
+                rescales = [params.map_pixel_in_meters, params.map_pixel_in_meters, 0.36]
+                t_mse_last = torch.mean(compute_sq_distance(l_mean_state, l_true_state, rescales)).item()
+
+                # log per epoch batch stats (only for gpu:0 or cpu)
+                if rank == torch.device('cpu') or rank == 0:
+                    b_loss.append(t_loss)
+                    b_mse_last.append(t_mse_last)
+                    b_n_eff.append(t_neff)
+                    b_mse_overall.append(t_mse_overall)
+                    b_success.append(t_successful)
+
+                    # print('train epoch: {0:05d}, batch: {1:05d}, b_loss: {2:03.3f}, mse_last: {3:03.3f}'.format(epoch, batch_idx, t_loss, t_mse_last))
+                    writer.add_scalars(f'epoch-{epoch:03d}_eval_stats', {
+                        't_loss': t_loss,
+                        't_mse_last': t_mse_last,
+                    }, batch_idx)
+
+        # log per epoch mean stats (only for gpu:0 or cpu)
+        if rank == torch.device('cpu') or rank == 0:
+            print(f'epoch: {epoch:05d}, mean_loss: {np.mean(b_loss):03.3f}, mean_mse_last: {np.mean(b_mse_last):03.3f}')
+            writer.add_scalars('eval_stats', {
+                    'mean_loss': np.mean(b_loss),
+                    'mean_mse_last': np.mean(b_mse_last),
+            }, epoch)
+
+            mean_rmse = np.mean(np.sqrt(b_mse_overall)) * 100
+            total_rmse = np.sqrt(np.mean(b_mse_overall)) * 100
+            mean_success = np.mean(np.array(b_success, 'i')) * 100
+            print(f'Mean RMSE (average RMSE per trajectory) = {mean_rmse:03.3f} cm')
+            print(f'Overall RMSE (reported value) = {total_rmse:03.3f} cm')
+            print(f'Success rate = {mean_success:03.3f}%')
+
+        # save (only for gpu:0 or cpu)
+        file_name = 'eval_models/' + 'pfnet_eval_eps_{0:03.3f}.pth'.format(np.mean(b_loss))
+        if rank == torch.device('cpu'):
+            save(model, file_name)
+        elif rank == 0:
+            save(model.module, file_name)
+
+    if rank != torch.device('cpu'):
+        cleanup()
+
+    print('validation finished')
 
 def loss_fn(outputs, true_states, params):
     particle_states, particle_weights, _ = outputs
@@ -261,6 +395,7 @@ def loss_fn(outputs, true_states, params):
     losses = {}
     losses['pfnet_loss'] = torch.mean(pfnet_loss)
     losses['dpf_loss'] = torch.mean(dpf_loss)
+    losses['loss_coords'] = loss_coords
 
     return losses
 
@@ -360,8 +495,14 @@ if __name__ == '__main__':
     if use_cuda:
         # multi-process run
         print(f'Avaialble GPUs - cuda:{os.environ["CUDA_VISIBLE_DEVICES"]}')
-        mp.spawn(run_pfnet, nprocs=params.n_gpu, args=(params,))
+        if not params.eval:
+            mp.spawn(run_pfnet_training, nprocs=params.n_gpu, args=(params,))
+        else:
+            mp.spawn(run_pfnet_validation, nprocs=params.n_gpu, args=(params,))
     else:
         # normal run
         rank = torch.device('cpu')
-        run_pfnet(rank, params)
+        if not params.eval:
+            run_pfnet_training(rank, params)
+        else:
+            run_pfnet_validation(rank, params)
