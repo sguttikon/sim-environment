@@ -21,7 +21,6 @@ import os
 import pf
 
 np.set_printoptions(precision=5, suppress=True)
-Path("train_models").mkdir(parents=True, exist_ok=True)
 
 # logger
 writer = SummaryWriter()
@@ -121,6 +120,8 @@ def run_episode(model, episode_batch):
 
 def run_pfnet(rank, params):
     print(f'Training on GPepisode_batchU rank {rank}.')
+    Path("train_models").mkdir(parents=True, exist_ok=True)
+
     # create model and move it to GPU with id rank
     if rank != torch.device('cpu'):
         setup(rank, params.world_size)
@@ -294,6 +295,7 @@ def loss_fn(outputs, true_states, params):
     losses = {}
     losses['pfnet_loss'] = torch.mean(pfnet_loss)
     losses['dpf_loss'] = torch.mean(dpf_loss)
+    losses['loss_coords'] = loss_coords
 
     return losses
 

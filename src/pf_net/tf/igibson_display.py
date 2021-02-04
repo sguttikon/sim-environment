@@ -157,6 +157,17 @@ def run_pfnet(params):
         print(f't_loss: {t_loss.item():03.3f} and t_mse_last: {t_mse_last:03.3f}')
         print(f'gt pose:  {l_true_state[0].detach().cpu().numpy()}\nest pose: {l_mean_state[0].detach().cpu().numpy()} in (mts, radians)')
 
+        all_distance2 = losses['loss_coords'].detach().cpu().numpy()
+        t_mse_overall = np.mean(all_distance2)
+        t_successful = np.all(all_distance2[-trajlen//4:] < 1.0 ** 2)  # below 1 meter
+
+        mean_rmse = np.mean(np.sqrt(t_mse_overall)) * 100
+        total_rmse = np.sqrt(np.mean(t_mse_overall)) * 100
+        mean_success = np.mean(np.array(t_successful, 'i')) * 100
+        print(f'Mean RMSE (average RMSE per trajectory) = {mean_rmse:03.3f} cm')
+        print(f'Overall RMSE (reported value) = {total_rmse:03.3f} cm')
+        print(f'Success rate = {mean_success:03.3f}%')
+
         data = {
             'global_maps': global_maps.detach().cpu().numpy(),
             'particle_states': t_particle_states.detach().cpu().numpy(),
