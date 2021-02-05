@@ -99,6 +99,8 @@ class PFCell(tf.keras.layers.AbstractRNNCell):
         :return (batch, k): particle likelihoods in the log space (unnormalized)
         """
 
+        batch_size, num_particles = particle_states.shape.as_list()[:2]
+
         # transform global maps to local maps
         local_maps = self.transform_maps(global_map, particle_states, (28, 28))
 
@@ -107,7 +109,7 @@ class PFCell(tf.keras.layers.AbstractRNNCell):
 
         # flatten batch and particle dimensions
         local_maps = tf.reshape(local_maps,
-                [self.batch_size * self.num_particles] + local_maps.shape.as_list()[2:])
+                [batch_size * num_particles] + local_maps.shape.as_list()[2:])
 
         # get features from local maps
         map_features = self.map_model(local_maps)
@@ -116,9 +118,9 @@ class PFCell(tf.keras.layers.AbstractRNNCell):
         obs_features = self.obs_model(observation)
 
         # tile observation features
-        obs_features = tf.tile(tf.expand_dims(obs_features, axis=1), [1, self.num_particles, 1, 1, 1])
+        obs_features = tf.tile(tf.expand_dims(obs_features, axis=1), [1, num_particles, 1, 1, 1])
         obs_features = tf.reshape(obs_features,
-                [self.batch_size * self.num_particles] + obs_features.shape.as_list()[2:])
+                [batch_size * num_particles] + obs_features.shape.as_list()[2:])
 
         # sanity check
         assert obs_features.shape.as_list()[:-1] == map_features.shape.as_list()[:-1]
@@ -128,9 +130,9 @@ class PFCell(tf.keras.layers.AbstractRNNCell):
         joint_features = self.joint_matrix_model(joint_features)
 
         # reshape to a vector
-        joint_features = tf.reshape(joint_features, [self.batch_size * self.num_particles, -1])
+        joint_features = tf.reshape(joint_features, [batch_size * num_particles, -1])
         lik = self.joint_vector_model(joint_features)
-        lik = tf.reshape(lik, [self.batch_size, self.num_particles])
+        lik = tf.reshape(lik, [batch_size, num_particles])
 
         return lik
 
@@ -149,15 +151,13 @@ class PFCell(tf.keras.layers.AbstractRNNCell):
         translation_std = self.transition_std[0] / self.map_pixel_in_meters   # in pixels
         rotation_std = self.transition_std[1]
 
-        shape = (self.batch_size, self.num_particles)
-
         part_x, part_y, part_th = tf.unstack(particle_states, axis=-1, num=3)   # (batch_size, num_particles, 3)
 
         odometry = tf.expand_dims(odometry, axis=1) # (batch_size, 1, 3)
         odom_x, odom_y, odom_th = tf.unstack(odometry, axis=-1, num=3)
 
         # sample noisy orientation
-        noise_th = tf.random.normal(shape, mean=0.0, stddev=1.0) * rotation_std
+        noise_th = tf.random.normal(part_th.get_shape(), mean=0.0, stddev=1.0) * rotation_std
 
         # add orientation noise before translation
         part_th = part_th + noise_th
@@ -169,8 +169,8 @@ class PFCell(tf.keras.layers.AbstractRNNCell):
         delta_th = odom_th
 
         # sample noisy translation
-        delta_x = delta_x + tf.random.normal(shape, mean=0.0, stddev=1.0) * translation_std
-        delta_y = delta_y + tf.random.normal(shape, mean=0.0, stddev=1.0) * translation_std
+        delta_x = delta_x + tf.random.normal(part_th.get_shape(), mean=0.0, stddev=1.0) * translation_std
+        delta_y = delta_y + tf.random.normal(part_th.get_shape(), mean=0.0, stddev=1.0) * translation_std
 
         return tf.stack([part_x + delta_x , part_y + delta_y, part_th + delta_th], axis=-1)   # (batch_size, num_particles, 3)
 
@@ -184,9 +184,8 @@ class PFCell(tf.keras.layers.AbstractRNNCell):
             of global map corresponding to particle state
         """
 
-        # flatten batch and particle dimensions
-        batch_size = self.batch_size
-        num_particles = self.num_particles
+        # flatten batch and particle
+        batch_size, num_particles = particle_states.shape.as_list()[:2]
         total_samples = batch_size * num_particles
         flat_states = tf.reshape(particle_states, [total_samples, 3])
 
@@ -252,13 +251,14 @@ class PFCell(tf.keras.layers.AbstractRNNCell):
 
 def pfnet_model(params):
 
-    observation = tf.keras.layers.Input(shape=[None, 56, 56, 3])   # (bs, T, 56, 56, 3)
-    odometry = tf.keras.Input(shape=[None, 3])    # (bs, T, 3)
-    global_map = tf.keras.Input(shape=[None, None, None, 1])   # (bs, T, H, W, 1)
-
+    batch_size = params.batch_size
     num_particles = params.num_particles
-    particle_states = tf.keras.layers.Input(shape=[num_particles, 3])   # (bs, k, 3)
-    particle_weights = tf.keras.Input(shape=[num_particles])    # (bs, k)
+    observation = tf.keras.Input(shape=[None, 56, 56, 3], batch_size=batch_size)   # (bs, T, 56, 56, 3)
+    odometry = tf.keras.Input(shape=[None, 3], batch_size=batch_size)    # (bs, T, 3)
+    global_map = tf.keras.Input(shape=[None, None, None, 1], batch_size=batch_size)   # (bs, T, H, W, 1)
+
+    particle_states = tf.keras.Input(shape=[num_particles, 3], batch_size=batch_size)   # (bs, k, 3)
+    particle_weights = tf.keras.Input(shape=[num_particles], batch_size=batch_size)    # (bs, k)
 
     cell = PFCell(params)
     rnn = tf.keras.layers.RNN(cell, return_state=True, return_sequences=True, stateful=False)
