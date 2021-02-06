@@ -16,7 +16,7 @@ def run_evaluation(params):
     trajlen = params.trajlen
 
     # evaluation data
-    test_ds = datautils.get_dataflow(params.testfiles, params.batch_size)
+    test_ds = datautils.get_dataflow(params.testfiles, params.batch_size, is_training=False)
 
     # pf model
     model = pfnet.pfnet_model(params)

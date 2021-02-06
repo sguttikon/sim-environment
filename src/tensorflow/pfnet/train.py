@@ -21,10 +21,10 @@ def run_training(params):
     num_segments = trajlen // bptt_steps
 
     # training data
-    train_ds = datautils.get_dataflow(params.trainfiles, params.batch_size)
+    train_ds = datautils.get_dataflow(params.trainfiles, params.batch_size, is_training=True)
 
     # validation data
-    test_ds = datautils.get_dataflow(params.testfiles, params.batch_size)
+    test_ds = datautils.get_dataflow(params.testfiles, params.batch_size, is_training=False)
 
     # pf model
     model = pfnet.pfnet_model(params)

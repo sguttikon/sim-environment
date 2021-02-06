@@ -220,10 +220,11 @@ def random_particles(num_particles, particles_distr, state, particles_cov):
     particles = np.stack(particles)
     return particles
 
-def get_dataflow(filenames, batch_size):
+def get_dataflow(filenames, batch_size, is_training=False):
 
     ds = tf.data.TFRecordDataset(filenames)
-    ds = ds.shuffle(100 * batch_size, reshuffle_each_iteration=True)
+    if is_training:
+        ds = ds.shuffle(100 * batch_size, reshuffle_each_iteration=True)
     ds = ds.map(read_tfrecord, num_parallel_calls=tf.data.experimental.AUTOTUNE)
     ds = ds.batch(batch_size, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE)
     # ds = ds.repeat(2)
