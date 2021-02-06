@@ -56,6 +56,9 @@ def parse_args():
     np.random.seed(params.seed)
     tf.random.set_seed(params.seed)
 
+    # use RNN as stateful/non-stateful
+    params.stateful = True
+
     # filter out info and warning messages
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 

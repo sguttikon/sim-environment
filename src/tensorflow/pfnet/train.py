@@ -61,6 +61,11 @@ def run_training(params):
             # start trajectory with initial particles and weights
             state = [init_particles, init_particle_weights]
 
+            # if stateful: reset RNN s.t. initial_state is set to initial particles and weights
+            # if non-stateful: pass the state explicity every step
+            if params.stateful:
+                model.layers[-1].reset_states(state)    # RNN layer
+
             # run training over small segments of bptt_steps
             for i in range(num_segments):
                 seg_labels = true_states[:, i:i+bptt_steps]
@@ -98,8 +103,7 @@ def run_training(params):
         # Save the weights
         model.save_weights(params.train_log_dir + f'/chks/checkpoint_{epoch}_{train_loss.result():03.3f}/pfnet_checkpoint')
 
-        run_validation = False
-        if run_validation:
+        if params.run_validation:
             # run validation over all testing samples in an epoch
             for raw_record in tqdm(test_ds.as_numpy_iterator()):
                 data_sample = datautils.transform_raw_record(raw_record, params)
@@ -117,6 +121,11 @@ def run_training(params):
 
                 # start trajectory with initial particles and weights
                 state = [init_particles, init_particle_weights]
+
+                # if stateful: reset RNN s.t. initial_state is set to initial particles and weights
+                # if non-stateful: pass the state explicity every step
+                if params.stateful:
+                    model.layers[-1].reset_states(state)    # RNN layer
 
                 # run training over small segments of bptt_steps
                 for i in range(num_segments):
@@ -160,5 +169,7 @@ if __name__ == '__main__':
     current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
     params.train_log_dir = 'logs/' + current_time + '/train/'
     params.test_log_dir = 'logs/' + current_time + '/test/'
+
+    params.run_validation = False
 
     run_training(params)

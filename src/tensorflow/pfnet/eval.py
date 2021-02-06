@@ -49,6 +49,11 @@ def run_evaluation(params):
             # start trajectory with initial particles and weights
             state = [init_particles, init_particle_weights]
 
+            # if stateful: reset RNN s.t. initial_state is set to initial particles and weights
+            # if non-stateful: pass the state explicity every step
+            if params.stateful:
+                model.layers[-1].reset_states(state)    # RNN layer
+
             input = [observations, odometry, global_map]
             model_input = (input, state)
 
