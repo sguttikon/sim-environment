@@ -4,9 +4,10 @@ import argparse
 import numpy as np
 import tensorflow as tf
 from utils import networks
+from tensorflow import keras
 from utils.spatial_transformer import transformer
 
-class PFCell(tf.keras.layers.AbstractRNNCell):
+class PFCell(keras.layers.AbstractRNNCell):
     """
     PF-Net custom implementation for localization with RNN interface
     Implements the particle set update: observation, tramsition models and soft-resampling
@@ -253,50 +254,50 @@ def pfnet_model(params):
 
     batch_size = params.batch_size
     num_particles = params.num_particles
-    observation = tf.keras.Input(shape=[None, 56, 56, 3], batch_size=batch_size)   # (bs, T, 56, 56, 3)
-    odometry = tf.keras.Input(shape=[None, 3], batch_size=batch_size)    # (bs, T, 3)
-    global_map = tf.keras.Input(shape=[None, None, None, 1], batch_size=batch_size)   # (bs, T, H, W, 1)
+    observation = keras.Input(shape=[None, 56, 56, 3], batch_size=batch_size)   # (bs, T, 56, 56, 3)
+    odometry = keras.Input(shape=[None, 3], batch_size=batch_size)    # (bs, T, 3)
+    global_map = keras.Input(shape=[None, None, None, 1], batch_size=batch_size)   # (bs, T, H, W, 1)
 
-    particle_states = tf.keras.Input(shape=[num_particles, 3], batch_size=batch_size)   # (bs, k, 3)
-    particle_weights = tf.keras.Input(shape=[num_particles], batch_size=batch_size)    # (bs, k)
+    particle_states = keras.Input(shape=[num_particles, 3], batch_size=batch_size)   # (bs, k, 3)
+    particle_weights = keras.Input(shape=[num_particles], batch_size=batch_size)    # (bs, k)
 
     cell = PFCell(params)
-    rnn = tf.keras.layers.RNN(cell, return_state=True, return_sequences=True, stateful=False)
+    rnn = keras.layers.RNN(cell, return_state=True, return_sequences=True, stateful=False)
 
     state = [particle_states, particle_weights]
     input = (observation, odometry, global_map)
     x = rnn(inputs=input, initial_state=state)
     output, state = x[:2], x[2:]
 
-    return tf.keras.Model(
+    return keras.Model(
         inputs=([observation, odometry, global_map], [particle_states, particle_weights]),
         outputs=([output, state])
     )
 
 if __name__ == '__main__':
     # obs_model = observation_model()
-    # tf.keras.utils.plot_model(obs_model, to_file='obs_model.png', show_shapes=True, dpi=64)
+    # keras.utils.plot_model(obs_model, to_file='obs_model.png', show_shapes=True, dpi=64)
     #
     # observations = np.random.random((8*10, 56, 56, 3))
     # obs_out = obs_model(observations)
     # print(obs_out.shape)
     #
     # map_model = map_model()
-    # tf.keras.utils.plot_model(map_model, to_file='map_model.png', show_shapes=True, dpi=64)
+    # keras.utils.plot_model(map_model, to_file='map_model.png', show_shapes=True, dpi=64)
     #
     # local_maps = np.random.random((8*10, 28, 28, 1))
     # map_out = map_model(local_maps)
     # print(map_out.shape)
     #
     # joint_matrix_model = joint_matrix_model()
-    # tf.keras.utils.plot_model(joint_matrix_model, to_file='joint_matrix_model.png', show_shapes=True, dpi=64)
+    # keras.utils.plot_model(joint_matrix_model, to_file='joint_matrix_model.png', show_shapes=True, dpi=64)
     #
     # joint_features = tf.concat([map_out, obs_out], axis=-1)
     # joint_matrix_out = joint_matrix_model(joint_features)
     # print(joint_matrix_out.shape)
     #
     # joint_vector_model = joint_vector_model()
-    # tf.keras.utils.plot_model(joint_vector_model, to_file='joint_vector_model.png', show_shapes=True, dpi=64)
+    # keras.utils.plot_model(joint_vector_model, to_file='joint_vector_model.png', show_shapes=True, dpi=64)
     #
     # joint_matrix_out = tf.reshape(joint_matrix_out, (8 * 10, -1))
     # joint_vector_out = joint_vector_model(joint_matrix_out)
@@ -324,7 +325,7 @@ if __name__ == '__main__':
     params.time_steps = 5
 
     model = pfnet_model(params)
-    tf.keras.utils.plot_model(model, to_file='pfnet_model.png', show_shapes=True, dpi=64)
+    keras.utils.plot_model(model, to_file='pfnet_model.png', show_shapes=True, dpi=64)
 
     particle_states = tf.random.uniform((params.batch_size, params.num_particles, 3))
     particle_weights = tf.random.uniform((params.batch_size, params.num_particles))

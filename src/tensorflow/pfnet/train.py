@@ -4,6 +4,7 @@ import pfnet
 import numpy as np
 from tqdm import tqdm
 import tensorflow as tf
+from tensorflow import keras
 from datetime import datetime
 from utils import datautils, arguments, pfnet_loss
 
@@ -33,8 +34,8 @@ def run_training(params):
     optimizer = tf.optimizers.Adam(learning_rate=params.learningrate)
 
     # Define metrics
-    train_loss = tf.keras.metrics.Mean('train_loss', dtype=tf.float32)
-    test_loss = tf.keras.metrics.Mean('test_loss', dtype=tf.float32)
+    train_loss = keras.metrics.Mean('train_loss', dtype=tf.float32)
+    test_loss = keras.metrics.Mean('test_loss', dtype=tf.float32)
 
     train_summary_writer = tf.summary.create_file_writer(params.train_log_dir + 'gradient_tape/')
     test_summary_writer = tf.summary.create_file_writer(params.test_log_dir + 'gradient_tape/')
