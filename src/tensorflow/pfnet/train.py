@@ -118,9 +118,10 @@ def run_training(params):
 
                 # compute gradients of the trainable variables with respect to the loss
                 gradients = tape.gradient(loss_pred, model.trainable_weights)
+                gradients = list(zip(gradients, model.trainable_weights))
 
                 # run one step of gradient descent
-                optimizer.apply_gradients(zip(gradients, model.trainable_weights))
+                optimizer.apply_gradients(gradients)
 
                 train_loss(loss_pred)
 
@@ -131,51 +132,53 @@ def run_training(params):
         # Save the weights
         model.save_weights(params.train_log_dir + f'/chks/checkpoint_{epoch}_{train_loss.result():03.3f}/pfnet_checkpoint')
 
-        # run validation over all testing samples in an epoch
-        for raw_record in tqdm(test_ds.as_numpy_iterator()):
-            data_sample = datautils.transform_raw_record(raw_record, params)
+        run_validation = False
+        if run_validation:
+            # run validation over all testing samples in an epoch
+            for raw_record in tqdm(test_ds.as_numpy_iterator()):
+                data_sample = datautils.transform_raw_record(raw_record, params)
 
-            observation = tf.convert_to_tensor(data_sample['observation'], dtype=tf.float32)
-            odometry = tf.convert_to_tensor(data_sample['odometry'], dtype=tf.float32)
-            true_states = tf.convert_to_tensor(data_sample['true_states'], dtype=tf.float32)
-            global_map = tf.convert_to_tensor(data_sample['global_map'], dtype=tf.float32)
-            init_particles = tf.convert_to_tensor(data_sample['init_particles'], dtype=tf.float32)
-            init_particle_weights = tf.constant(np.log(1.0/float(num_particles)),
-                                        shape=(batch_size, num_particles), dtype=tf.float32)
+                observation = tf.convert_to_tensor(data_sample['observation'], dtype=tf.float32)
+                odometry = tf.convert_to_tensor(data_sample['odometry'], dtype=tf.float32)
+                true_states = tf.convert_to_tensor(data_sample['true_states'], dtype=tf.float32)
+                global_map = tf.convert_to_tensor(data_sample['global_map'], dtype=tf.float32)
+                init_particles = tf.convert_to_tensor(data_sample['init_particles'], dtype=tf.float32)
+                init_particle_weights = tf.constant(np.log(1.0/float(num_particles)),
+                                            shape=(batch_size, num_particles), dtype=tf.float32)
 
-            # HACK: tile global map since RNN accepts [batch, time_steps, ...]
-            seg_global_map = tf.tile(tf.expand_dims(global_map, axis=1), [1, bptt_steps, 1, 1, 1])
+                # HACK: tile global map since RNN accepts [batch, time_steps, ...]
+                seg_global_map = tf.tile(tf.expand_dims(global_map, axis=1), [1, bptt_steps, 1, 1, 1])
 
-            # start trajectory with initial particles and weights
-            state = [init_particles, init_particle_weights]
+                # start trajectory with initial particles and weights
+                state = [init_particles, init_particle_weights]
 
-            # run training over small segments of bptt_steps
-            for i in range(num_segments):
-                seg_labels = true_states[:, i:i+bptt_steps]
+                # run training over small segments of bptt_steps
+                for i in range(num_segments):
+                    seg_labels = true_states[:, i:i+bptt_steps]
 
-                seg_obs = observation[:, i:i+bptt_steps]
-                seg_odom = odometry[:, i:i+bptt_steps]
-                input = [seg_obs, seg_odom, seg_global_map]
+                    seg_obs = observation[:, i:i+bptt_steps]
+                    seg_odom = odometry[:, i:i+bptt_steps]
+                    input = [seg_obs, seg_odom, seg_global_map]
 
-                model_input = (input, state)
+                    model_input = (input, state)
 
-                # forward pass
-                output, state = model(model_input, training=False)
+                    # forward pass
+                    output, state = model(model_input, training=False)
 
-                # compute loss
-                particle_states, particle_weights = output
-                loss_dict = compute_loss(particle_states, particle_weights, seg_labels, params.map_pixel_in_meters)
+                    # compute loss
+                    particle_states, particle_weights = output
+                    loss_dict = compute_loss(particle_states, particle_weights, seg_labels, params.map_pixel_in_meters)
 
-                loss_pred = loss_dict['pred']
+                    loss_pred = loss_dict['pred']
 
-                test_loss(loss_pred)
+                    test_loss(loss_pred)
 
-        # log epoch validation stats
-        with test_summary_writer.as_default():
-            tf.summary.scalar('loss', test_loss.result(), step=epoch)
+            # log epoch validation stats
+            with test_summary_writer.as_default():
+                tf.summary.scalar('loss', test_loss.result(), step=epoch)
 
-        # Save the weights
-        model.save_weights(params.test_log_dir + f'/chks/checkpoint_{epoch}_{test_loss.result():03.3f}/pfnet_checkpoint')
+            # Save the weights
+            model.save_weights(params.test_log_dir + f'/chks/checkpoint_{epoch}_{test_loss.result():03.3f}/pfnet_checkpoint')
 
         print(f'Epoch {epoch}, train loss: {train_loss.result()}, test loss: {test_loss.result()}')
 

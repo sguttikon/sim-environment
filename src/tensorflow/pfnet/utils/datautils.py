@@ -225,7 +225,7 @@ def get_dataflow(filenames, batch_size):
     ds = tf.data.TFRecordDataset(filenames)
     ds = ds.shuffle(100 * batch_size, reshuffle_each_iteration=True)
     ds = ds.map(read_tfrecord, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-    ds = ds.batch(batch_size).prefetch(tf.data.experimental.AUTOTUNE)
+    ds = ds.batch(batch_size, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE)
     # ds = ds.repeat(2)
 
     return ds

@@ -50,9 +50,9 @@ def dense_layer(units, activation=None, use_bias=True):
     return result
 
 ##### custom fuctions for constructing models ####
-def map_model():
+def map_encoder():
 
-    local_maps = tf.keras.layers.Input(shape=[28, 28, 1])   # (bs*np, 28, 28, 1)
+    local_maps = tf.keras.Input(shape=[28, 28, 1], name="local_maps")   # (bs*np, 28, 28, 1)
     assert local_maps.get_shape().as_list()[1:3] == [28, 28]
     x = local_maps
 
@@ -82,13 +82,13 @@ def map_model():
     x = tf.keras.layers.ReLU()(x)
     assert x.get_shape().as_list()[1:4] == [14, 14, 8]
 
-    return tf.keras.Model(inputs=local_maps, outputs=x)
+    return tf.keras.Model(inputs=local_maps, outputs=x, name="map_encoder")
 
-def observation_model():
+def obs_encoder():
 
-    observation = tf.keras.layers.Input(shape=[56, 56, 3])   # (bs, 56, 56, 3)
-    assert observation.get_shape().as_list()[1:3] == [56, 56]
-    x = observation
+    observations = tf.keras.Input(shape=[56, 56, 3], name="observations")   # (bs, 56, 56, 3)
+    assert observations.get_shape().as_list()[1:3] == [56, 56]
+    x = observations
 
     conv_stack = [
         conv2_layer(128, 3, use_bias=True)(x),  # (bs, 56, 56, 128)
@@ -114,11 +114,11 @@ def observation_model():
     x = tf.keras.layers.ReLU()(x)
     assert x.get_shape().as_list()[1:4] == [14, 14, 16]
 
-    return tf.keras.Model(inputs=observation, outputs=x)
+    return tf.keras.Model(inputs=observations, outputs=x, name="obs_encoder")
 
-def joint_matrix_model():
+def map_obs_encoder():
 
-    joint_matrix = tf.keras.layers.Input(shape=[14, 14, 24])   # (bs*np, 14, 14, 24)
+    joint_matrix = tf.keras.Input(shape=[14, 14, 24], name="map_obs_features")   # (bs*np, 14, 14, 24)
     assert joint_matrix.get_shape().as_list()[1:4] == [14, 14, 24]
     x = joint_matrix
 
@@ -136,15 +136,15 @@ def joint_matrix_model():
             data_format='channels_last')(x) # (bs, 5, 5, 16)
     assert x.get_shape().as_list()[1:4] == [5, 5, 16]
 
-    return tf.keras.Model(inputs=joint_matrix, outputs=x)
+    return tf.keras.Model(inputs=joint_matrix, outputs=x, name="map_obs_encoder")
 
-def joint_vector_model():
+def likelihood_estimator():
 
-    joint_vector = tf.keras.layers.Input(shape=[400])   # (bs*np, 5 * 5 * 16)
+    joint_vector = tf.keras.Input(shape=[400], name="map_obs_joint_features")   # (bs*np, 5 * 5 * 16)
     assert joint_vector.get_shape().as_list()[1] == 400
     x = joint_vector
 
     x = dense_layer(1, use_bias=True)(x)   # (bs*np, 1)
     assert x.get_shape().as_list()[1] == 1
 
-    return tf.keras.Model(inputs=joint_vector, outputs=x)
+    return tf.keras.Model(inputs=joint_vector, outputs=x, name="likelihood_estimator")

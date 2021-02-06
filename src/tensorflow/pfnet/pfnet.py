@@ -29,10 +29,10 @@ class PFCell(tf.keras.layers.AbstractRNNCell):
         super(PFCell, self).__init__(**kwargs)
 
         # models
-        self.obs_model = networks.observation_model()
-        self.map_model = networks.map_model()
-        self.joint_matrix_model = networks.joint_matrix_model()
-        self.joint_vector_model = networks.joint_vector_model()
+        self.obs_model = networks.obs_encoder()
+        self.map_model = networks.map_encoder()
+        self.joint_matrix_model = networks.map_obs_encoder()
+        self.joint_vector_model = networks.likelihood_estimator()
 
     @property
     def state_size(self):

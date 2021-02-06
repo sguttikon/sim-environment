@@ -55,6 +55,9 @@ def parse_args():
     np.random.seed(params.seed)
     tf.random.set_seed(params.seed)
 
+    # filter out info and warning messages
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
     # convert boolean fields
     if params.resample not in ['false', 'true']:
         raise ValurError
