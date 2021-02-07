@@ -121,6 +121,7 @@ def transform_raw_record(raw_record, params):
     num_particles = params.num_particles
     init_particles_cov = params.init_particles_cov
     init_particles_distr = params.init_particles_distr
+    global_map_size = params.global_map_size
 
     # process true states
     states = []
@@ -159,17 +160,9 @@ def transform_raw_record(raw_record, params):
 
     # process wall map
     map_walls = []
-    max_height, max_width, max_channel = (0, 0, 0)
     for map_wall in raw_record['map_wall']:
         wall_img = process_wall_map(map_wall)
         map_walls.append(wall_img)
-        old_shape = wall_img.shape
-        if max_height < old_shape[0]:
-            max_height = old_shape[0]
-        if max_width < old_shape[1]:
-            max_width = old_shape[1]
-        if max_channel < old_shape[2]:
-            max_channel = old_shape[2]
 
     # generate random particle states
     trans_record['init_particles'] = random_particles(
@@ -180,8 +173,7 @@ def transform_raw_record(raw_record, params):
                                     )   # (batch_size, num_particles, 3)
 
     # zero pad map wall image
-    new_shape = (max_height, max_width, max_channel)
-    pad_map_walls = pad_images(map_walls, new_shape)
+    pad_map_walls = pad_images(map_walls, global_map_size)
     trans_record['global_map'] = np.stack(pad_map_walls)  # (batch_size, H, W, 1)
 
     return trans_record

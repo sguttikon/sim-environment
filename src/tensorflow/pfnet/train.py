@@ -56,11 +56,8 @@ def run_training(params):
             init_particle_weights = tf.constant(np.log(1.0/float(num_particles)),
                                         shape=(batch_size, num_particles), dtype=tf.float32)
 
-            # HACK: tile global map since RNN accepts [batch, time_steps, ...]
-            global_map = tf.tile(tf.expand_dims(global_map, axis=1), [1, trajlen, 1, 1, 1])
-
             # start trajectory with initial particles and weights
-            state = [init_particles, init_particle_weights]
+            state = [init_particles, init_particle_weights, global_map]
 
             # if stateful: reset RNN s.t. initial_state is set to initial particles and weights
             # if non-stateful: pass the state explicity every step
@@ -68,7 +65,7 @@ def run_training(params):
                 model.layers[-1].reset_states(state)    # RNN layer
 
             # run training over trajectory
-            input = [observation, odometry, global_map]
+            input = [observation, odometry]
             model_input = (input, state)
 
             # enable auto-differentiation

@@ -27,6 +27,7 @@ class PFCell(keras.layers.AbstractRNNCell):
 
         self.states_shape = (self.batch_size, self.num_particles, 3)
         self.weights_shape = (self.batch_size, self.num_particles)
+        self.map_shape = (self.batch_size, *params.global_map_size)
         super(PFCell, self).__init__(**kwargs)
 
         # models
@@ -41,7 +42,7 @@ class PFCell(keras.layers.AbstractRNNCell):
         Size(s) of state(s) used by this cell
         :return tuple(TensorShapes): shape of particle_states, particle_weights
         """
-        return [tf.TensorShape(self.states_shape[1:]), tf.TensorShape(self.weights_shape[1:])]
+        return [tf.TensorShape(self.states_shape[1:]), tf.TensorShape(self.weights_shape[1:]), tf.TensorShape(self.map_shape[1:])]
 
     @property
     def output_size(self):
@@ -49,7 +50,7 @@ class PFCell(keras.layers.AbstractRNNCell):
         Size(s) of output(s) produced by this cell
         :return tuple(TensorShapes): shape of particle_states, particle_weights
         """
-        return [tf.TensorShape(self.states_shape[1:]), tf.TensorShape(self.weights_shape[1:])]
+        return [tf.TensorShape(self.states_shape[1:]), tf.TensorShape(self.weights_shape[1:]), tf.TensorShape(self.map_shape[1:])]
 
     def call(self, input, state):
         """
@@ -65,8 +66,8 @@ class PFCell(keras.layers.AbstractRNNCell):
         :return state: updated particle_states and particle_weights.
             (but after both observation and transition updates)
         """
-        particle_states, particle_weights = state
-        observation, odometry, global_map = input
+        particle_states, particle_weights, global_map = state
+        observation, odometry = input
 
         # observation update
         lik = self.observation_update(
@@ -84,7 +85,7 @@ class PFCell(keras.layers.AbstractRNNCell):
         particle_states = self.transition_model(particle_states, odometry)
 
         # construct new state after motion update
-        state = [particle_states, particle_weights]
+        state = [particle_states, particle_weights, global_map]
 
         return output, state
 
@@ -254,18 +255,19 @@ def pfnet_model(params):
 
     batch_size = params.batch_size
     num_particles = params.num_particles
+    global_map_size = params.global_map_size
     observation = keras.Input(shape=[None, 56, 56, 3], batch_size=batch_size)   # (bs, T, 56, 56, 3)
     odometry = keras.Input(shape=[None, 3], batch_size=batch_size)    # (bs, T, 3)
-    global_map = keras.Input(shape=[None, None, None, 1], batch_size=batch_size)   # (bs, T, H, W, 1)
 
+    global_map = keras.Input(shape=global_map_size, batch_size=batch_size)   # (bs, H, W, 1)
     particle_states = keras.Input(shape=[num_particles, 3], batch_size=batch_size)   # (bs, k, 3)
     particle_weights = keras.Input(shape=[num_particles], batch_size=batch_size)    # (bs, k)
 
     cell = PFCell(params)
     rnn = keras.layers.RNN(cell, return_state=True, return_sequences=True, stateful=params.stateful)
 
-    state = [particle_states, particle_weights]
-    input = (observation, odometry, global_map)
+    state = [particle_states, particle_weights, global_map]
+    input = (observation, odometry)
     if params.stateful:
         x = rnn(inputs=input)
     else:
@@ -273,7 +275,7 @@ def pfnet_model(params):
     output, state = x[:2], x[2:]
 
     return keras.Model(
-        inputs=([observation, odometry, global_map], [particle_states, particle_weights]),
+        inputs=([observation, odometry], [particle_states, particle_weights, global_map]),
         outputs=([output, state])
     )
 

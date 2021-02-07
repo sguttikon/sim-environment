@@ -58,6 +58,9 @@ def parse_args():
     # use RNN as stateful/non-stateful
     params.stateful = True
 
+    #HACK hardcode fix padding for map
+    params.global_map_size = (4000, 4000, 1)
+
     # filter out info and warning messages
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
