@@ -8,6 +8,8 @@ from tensorflow import keras
 from datetime import datetime
 from utils import datautils, arguments, pfnet_loss
 
+np.set_printoptions(precision=3, suppress=True)
+
 def dataset_size():
     return 800
 
@@ -19,7 +21,7 @@ def run_training(params):
     batch_size = params.batch_size
     num_particles = params.num_particles
     trajlen = params.trajlen
-    iterations = dataset_size() // batch_size
+    num_batches = dataset_size() // batch_size
 
     # training data
     train_ds = datautils.get_dataflow(params.trainfiles, params.batch_size, params.s_buffer_size, is_training=True)
@@ -44,7 +46,7 @@ def run_training(params):
     for epoch in range(params.epochs):
         itr = train_ds.as_numpy_iterator()
         # run training over all training samples in an epoch
-        for idx in tqdm(range(iterations)):
+        for idx in tqdm(range(num_batches)):
             raw_record = next(itr)
             data_sample = datautils.transform_raw_record(raw_record, params)
 
@@ -76,7 +78,6 @@ def run_training(params):
                 # compute loss
                 particle_states, particle_weights = output
                 loss_dict = pfnet_loss.compute_loss(particle_states, particle_weights, true_states, params.map_pixel_in_meters)
-
                 loss_pred = loss_dict['pred']
 
             # compute gradients of the trainable variables with respect to the loss

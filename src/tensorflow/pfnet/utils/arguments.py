@@ -57,7 +57,7 @@ def parse_args():
 
     # use RNN as stateful/non-stateful
     params.stateful = False
-    params.return_state = False
+    params.return_state = True
 
     #HACK hardcode fix padding for map
     params.global_map_size = (4000, 4000, 1)

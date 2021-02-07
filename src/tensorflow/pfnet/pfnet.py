@@ -256,8 +256,9 @@ def pfnet_model(params):
     batch_size = params.batch_size
     num_particles = params.num_particles
     global_map_size = params.global_map_size
-    observation = keras.Input(shape=[None, 56, 56, 3], batch_size=batch_size)   # (bs, T, 56, 56, 3)
-    odometry = keras.Input(shape=[None, 3], batch_size=batch_size)    # (bs, T, 3)
+    trajlen = params.trajlen
+    observation = keras.Input(shape=[trajlen, 56, 56, 3], batch_size=batch_size)   # (bs, T, 56, 56, 3)
+    odometry = keras.Input(shape=[trajlen, 3], batch_size=batch_size)    # (bs, T, 3)
 
     global_map = keras.Input(shape=global_map_size, batch_size=batch_size)   # (bs, H, W, 1)
     particle_states = keras.Input(shape=[num_particles, 3], batch_size=batch_size)   # (bs, k, 3)
