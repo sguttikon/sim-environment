@@ -56,7 +56,8 @@ def parse_args():
     tf.random.set_seed(params.seed)
 
     # use RNN as stateful/non-stateful
-    params.stateful = True
+    params.stateful = False
+    params.return_state = False
 
     #HACK hardcode fix padding for map
     params.global_map_size = (4000, 4000, 1)

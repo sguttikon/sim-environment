@@ -264,7 +264,10 @@ def pfnet_model(params):
     particle_weights = keras.Input(shape=[num_particles], batch_size=batch_size)    # (bs, k)
 
     cell = PFCell(params)
-    rnn = keras.layers.RNN(cell, return_state=True, return_sequences=True, stateful=params.stateful)
+    rnn = keras.layers.RNN(
+                    cell, return_sequences=True,
+                    return_state=params.return_state, stateful=params.stateful
+    )
 
     state = [particle_states, particle_weights, global_map]
     input = (observation, odometry)
