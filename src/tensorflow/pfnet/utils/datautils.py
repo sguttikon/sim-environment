@@ -116,17 +116,11 @@ def transform_raw_record(raw_record, params):
     """
     trans_record = {}
 
-    batch_size = params.batch_size
     trajlen = params.trajlen
-    bptt_steps = params.bptt_steps
+    batch_size = params.batch_size
     num_particles = params.num_particles
-    init_particles_distr = params.init_particles_distr
     init_particles_cov = params.init_particles_cov
-
-    assert trajlen % bptt_steps == 0
-    num_segments = trajlen // bptt_steps
-
-    seq_indices = np.arange(trajlen)[0:-1:bptt_steps]
+    init_particles_distr = params.init_particles_distr
 
     # process true states
     states = []
@@ -220,11 +214,11 @@ def random_particles(num_particles, particles_distr, state, particles_cov):
     particles = np.stack(particles)
     return particles
 
-def get_dataflow(filenames, batch_size, is_training=False):
+def get_dataflow(filenames, batch_size, s_buffer_size=100, is_training=False):
 
     ds = tf.data.TFRecordDataset(filenames)
     if is_training:
-        ds = ds.shuffle(100 * batch_size, reshuffle_each_iteration=True)
+        ds = ds.shuffle(s_buffer_size, reshuffle_each_iteration=True)
     ds = ds.map(read_tfrecord, num_parallel_calls=tf.data.experimental.AUTOTUNE)
     ds = ds.batch(batch_size, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE)
     # ds = ds.repeat(2)

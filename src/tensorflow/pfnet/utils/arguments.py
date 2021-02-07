@@ -32,7 +32,6 @@ def parse_args():
 
     # training configuration
     argparser.add_argument('--batch_size', type=int, default=24, help='Minibatch size for training.')
-    argparser.add_argument('--bptt_steps', type=int, default=4, help='Number of backpropagation steps for training with backpropagation through time (BPTT).')
     argparser.add_argument('--learningrate', type=float, default=0.0025, help='Initial learning rate for training.')
     argparser.add_argument('--epochs', type=int, default=1, help='Number of epochs for training.')
 

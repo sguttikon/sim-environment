@@ -7,6 +7,7 @@ from torchvision import transforms
 import torch.multiprocessing as mp
 import torch.distributed as dist
 from pathlib import Path
+import tensorflow as tf
 from tqdm import tqdm
 import numpy as np
 import argparse
@@ -471,6 +472,7 @@ if __name__ == '__main__':
 
     # set common seed value
     torch.cuda.manual_seed(params.seed)
+    tf.random.set_seed(params.seed)
     torch.manual_seed(params.seed)
     np.random.seed(params.seed)
     random.seed(params.seed)
