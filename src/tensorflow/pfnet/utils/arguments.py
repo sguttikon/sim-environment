@@ -29,6 +29,7 @@ def parse_args():
     argparser.add_argument('--num_particles', type=int, default=30, help='Number of particles in Particle Filter.')
     argparser.add_argument('--transition_std', nargs='*', default=["0.0", "0.0"], help='Standard deviations for transition model. Values: translation std (meters), rotation std (radians)')
     argparser.add_argument('--resample', type=str, default='false', help='Resample particles in Particle Filter. Possible values: true / false.')
+    argparser.add_argument('--alpha_resample_ratio', type=float, default=1.0, help='Trade-off parameter for soft-resampling in PF-net. Only effective if resample == true. Assumes values 0.0 < alpha <= 1.0. Alpha equal to 1.0 corresponds to hard-resampling.')
 
     # training configuration
     argparser.add_argument('--batch_size', type=int, default=24, help='Minibatch size for training.')

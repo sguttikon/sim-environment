@@ -20,14 +20,11 @@ class PFCell(keras.layers.AbstractRNNCell):
         """
         :param params: parsed arguments
         """
-        self.batch_size = params.batch_size
-        self.num_particles = params.num_particles
-        self.transition_std = params.transition_std
-        self.map_pixel_in_meters = params.map_pixel_in_meters
+        self.params = params
 
-        self.states_shape = (self.batch_size, self.num_particles, 3)
-        self.weights_shape = (self.batch_size, self.num_particles)
-        self.map_shape = (self.batch_size, *params.global_map_size)
+        self.states_shape = (self.params.batch_size, self.params.num_particles, 3)
+        self.weights_shape = (self.params.batch_size, self.params.num_particles)
+        self.map_shape = (self.params.batch_size, *self.params.global_map_size)
         super(PFCell, self).__init__(**kwargs)
 
         # models
@@ -76,7 +73,11 @@ class PFCell(keras.layers.AbstractRNNCell):
         particle_weights = particle_weights + lik # unnormalized
 
         # resample
-        # TODO
+        if self.params.resample:
+            particle_states, particle_weights = self.resample(
+                    particle_states, particle_weights,
+                    alpha=self.params.alpha_resample_ratio
+            )
 
         # construct output before motion update
         output = [particle_states, particle_weights]
@@ -138,9 +139,57 @@ class PFCell(keras.layers.AbstractRNNCell):
 
         return lik
 
-    def resample(particle_states, particle_weights, alpha):
-        # TODO
-        pass
+    def resample(self, particle_states, particle_weights, alpha):
+        """
+        Implements soft-resampling of particles
+        :param particle_states: particle states (batch, k, 3)
+        :param particle_weights: unnormalized particle weights in log space (batch, k)
+        :param alpha: trade-off parameter for soft-resampling
+            alpha == 1, corresponds to standard hard-resampling
+            alpha == 0, corresponds to sampling particles uniformly ignoring weights
+        :return (batch, k, 3) (batch, k): resampled particle states and particle weights
+        """
+
+        assert 0.0 < alpha <= 1.0
+        batch_size, num_particles = particle_states.shape.as_list()[:2]
+
+        # normalize weights
+        particle_weights = particle_weights - tf.math.reduce_logsumexp(particle_weights, axis=-1, keepdims=True)
+
+        # sample uniform weights
+        uniform_weights = tf.constant(np.log(1.0/float(num_particles)),
+                                    shape=(batch_size, num_particles), dtype=tf.float32)
+
+        # build sample distribution q(s) and update particle weights
+        if alpha < 1.0:
+            # soft-resampling
+            q_weights = tf.stack([
+                        particle_weights + np.log(alpha),
+                        uniform_weights + np.log(1.0 - alpha)
+            ], axis=-1)
+            q_weights = tf.math.reduce_logsumexp(q_weights, axis=-1, keepdims=False)
+            q_weights = q_weights - tf.reduce_logsumexp(q_weights, axis=-1, keepdims=True) # normalized
+
+            particle_weights = particle_weights - q_weights  # unnormalized
+        else:
+            # hard-resampling -> produces zero gradients
+            q_weights = particle_weights
+            particle_weights = uniform_weights
+
+        # sample particle indices according to q(s)
+        indices = tf.random.categorical(q_weights, num_particles,dtype=tf.int32)  # shape: (bs, k)
+
+        # index into particles
+        helper = tf.range(0, batch_size*num_particles, delta=num_particles, dtype=tf.int32)  # (batch, )
+        indices = indices + tf.expand_dims(helper, axis=1)
+
+        particle_states = tf.reshape(particle_states, (batch_size * num_particles, 3))
+        particle_states = tf.gather(particle_states, indices=indices, axis=0)  # (bs, k, 3)
+
+        particle_weights = tf.reshape(particle_weights, (batch_size * num_particles, ))
+        particle_weights = tf.gather(particle_weights, indices=indices, axis=0)  # (bs, k)
+
+        return particle_states, particle_weights
 
     def transition_model(self, particle_states, odometry):
         """
@@ -150,10 +199,10 @@ class PFCell(keras.layers.AbstractRNNCell):
         :return (batch, k, 3): particle states updated with the odometry and optionally transition noise
         """
 
-        translation_std = self.transition_std[0] / self.map_pixel_in_meters   # in pixels
-        rotation_std = self.transition_std[1]
+        translation_std = self.params.transition_std[0] / self.params.map_pixel_in_meters   # in pixels
+        rotation_std = self.params.transition_std[1]
 
-        part_x, part_y, part_th = tf.unstack(particle_states, axis=-1, num=3)   # (batch_size, num_particles, 3)
+        part_x, part_y, part_th = tf.unstack(particle_states, axis=-1, num=3)   # (bs, k, 3)
 
         odometry = tf.expand_dims(odometry, axis=1) # (batch_size, 1, 3)
         odom_x, odom_y, odom_th = tf.unstack(odometry, axis=-1, num=3)
@@ -171,10 +220,10 @@ class PFCell(keras.layers.AbstractRNNCell):
         delta_th = odom_th
 
         # sample noisy translation
-        delta_x = delta_x + tf.random.normal(part_th.get_shape(), mean=0.0, stddev=1.0) * translation_std
-        delta_y = delta_y + tf.random.normal(part_th.get_shape(), mean=0.0, stddev=1.0) * translation_std
+        delta_x = delta_x + tf.random.normal(delta_x.get_shape(), mean=0.0, stddev=1.0) * translation_std
+        delta_y = delta_y + tf.random.normal(delta_y.get_shape(), mean=0.0, stddev=1.0) * translation_std
 
-        return tf.stack([part_x + delta_x , part_y + delta_y, part_th + delta_th], axis=-1)   # (batch_size, num_particles, 3)
+        return tf.stack([part_x + delta_x , part_y + delta_y, part_th + delta_th], axis=-1)   # (bs, k, 3)
 
     def transform_maps(self, global_map, particle_states, local_map_size):
         """

@@ -34,7 +34,7 @@ def run_evaluation(params):
     for epoch in range(params.epochs):
         mse_list = []
         success_list = []
-        itr = train_ds.as_numpy_iterator()
+        itr = test_ds.as_numpy_iterator()
         # run evaluation over all evaluation samples in an epoch
         for idx in tqdm(range(num_batches)):
             raw_record = next(itr)
@@ -86,6 +86,5 @@ def run_evaluation(params):
 
 if __name__ == '__main__':
     params = arguments.parse_args()
-    params.s_buffer_size = 500
     
     run_evaluation(params)
