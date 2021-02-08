@@ -6,6 +6,9 @@ from tqdm import tqdm
 import tensorflow as tf
 from utils import datautils, arguments, pfnet_loss
 
+def dataset_size():
+    return 800
+
 def run_evaluation(params):
     """
     run training with the parsed arguments
@@ -14,6 +17,7 @@ def run_evaluation(params):
     batch_size = params.batch_size
     num_particles = params.num_particles
     trajlen = params.trajlen
+    num_batches = dataset_size() // batch_size
 
     # evaluation data
     test_ds = datautils.get_dataflow(params.testfiles, params.batch_size, is_training=False)
@@ -30,9 +34,10 @@ def run_evaluation(params):
     for epoch in range(params.epochs):
         mse_list = []
         success_list = []
-
+        itr = train_ds.as_numpy_iterator()
         # run evaluation over all evaluation samples in an epoch
-        for raw_record in tqdm(test_ds.as_numpy_iterator()):
+        for idx in tqdm(range(num_batches)):
+            raw_record = next(itr)
             data_sample = datautils.transform_raw_record(raw_record, params)
 
             observations = tf.convert_to_tensor(data_sample['observation'], dtype=tf.float32)
@@ -43,18 +48,15 @@ def run_evaluation(params):
             init_particle_weights = tf.constant(np.log(1.0/float(num_particles)),
                                         shape=(batch_size, num_particles), dtype=tf.float32)
 
-            # HACK: tile global map since RNN accepts [batch, time_steps, ...]
-            global_map = tf.tile(tf.expand_dims(global_map, axis=1), [1, trajlen, 1, 1, 1])
-
             # start trajectory with initial particles and weights
-            state = [init_particles, init_particle_weights]
+            state = [init_particles, init_particle_weights, global_map]
 
             # if stateful: reset RNN s.t. initial_state is set to initial particles and weights
             # if non-stateful: pass the state explicity every step
             if params.stateful:
                 model.layers[-1].reset_states(state)    # RNN layer
 
-            input = [observations, odometry, global_map]
+            input = [observations, odometry]
             model_input = (input, state)
 
             # forward pass
@@ -76,13 +78,14 @@ def run_evaluation(params):
         mean_rmse = np.mean(np.sqrt(mse_list))
         total_rmse = np.sqrt(np.mean(mse_list))
         mean_success = np.mean(np.array(success_list, 'i'))
-        print(f'Mean RMSE (average RMSE per trajectory) = {mean_rmse*100} cm')
-        print(f'Overall RMSE (reported value) = {total_rmse*100} cm')
-        print(f'Success rate = {mean_success*100} %')
+        print(f'Mean RMSE (average RMSE per trajectory) = {mean_rmse*100:03.3f} cm')
+        print(f'Overall RMSE (reported value) = {total_rmse*100:03.3f} cm')
+        print(f'Success rate = {mean_success*100:03.3f} %')
 
     print('evaluation finished')
 
 if __name__ == '__main__':
     params = arguments.parse_args()
-
+    params.s_buffer_size = 500
+    
     run_evaluation(params)

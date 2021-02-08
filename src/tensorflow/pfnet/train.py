@@ -150,7 +150,7 @@ def run_training(params):
             # Save the weights
             model.save_weights(params.test_log_dir + f'/chks/checkpoint_{epoch}_{test_loss.result():03.3f}/pfnet_checkpoint')
 
-        print(f'Epoch {epoch}, train loss: {train_loss.result()}, test loss: {test_loss.result()}')
+        print(f'Epoch {epoch}, train loss: {train_loss.result():03.3f}, test loss: {test_loss.result():03.3f}')
 
         # Reset the metrics at the start of the next epoch
         train_loss.reset_states()
