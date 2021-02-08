@@ -1,0 +1,11 @@
+Feb 7th 2020
+------------
+train_data_size = 800
+python train.py --trainfiles '../../pf_net/tf/data/valid.tfrecords' --batch_size 4 --learningrate 0.0001 --epochs 20 --num_particles 30 --trajlen 24
+
+python eval.py --load './logs/20210207-141027/train/chks/checkpoint_19_0.686/pfnet_checkpoint' --testfiles '../../pf_net/tf/data/valid.tfrecords' --batch_size 8 --epochs 1 --num_particles 300 --trajlen 24
+
+results:
+Mean RMSE (average RMSE per trajectory) = 62.236 cm
+Overall RMSE (reported value) = 66.730 cm
+Success rate = 17.000 %
