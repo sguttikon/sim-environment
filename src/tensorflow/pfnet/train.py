@@ -128,7 +128,7 @@ def run_training(params):
                 model_input = (input, state)
 
                 # forward pass
-                output, state = model(model_input, training=True)
+                output, state = model(model_input, training=False)
 
                 # compute loss
                 particle_states, particle_weights = output
