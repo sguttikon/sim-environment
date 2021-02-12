@@ -9,3 +9,9 @@ results:
 Mean RMSE (average RMSE per trajectory) = 62.236 cm
 Overall RMSE (reported value) = 66.730 cm
 Success rate = 17.000 %
+
+
+Feb 8th 2020
+------------
+train_data_size = 16000
+nohup python train.py --trainfiles '../../pf_net/tf/data/train.tfrecords' --batch_size 4 --learningrate 0.0001 --epochs 20 --num_particles 30 --trajlen 24 &

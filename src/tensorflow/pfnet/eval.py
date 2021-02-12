@@ -27,7 +27,7 @@ def run_evaluation(params):
 
     # load model from checkpoint file
     if params.load:
-        print("Loading model from " + params.load)
+        print("=====> Loading model from " + params.load)
         model.load_weights(params.load)
 
     # repeat for a fixed number of epochs
@@ -75,16 +75,16 @@ def run_evaluation(params):
             success_list.append(successful)
 
         # report results
-        mean_rmse = np.mean(np.sqrt(mse_list))
-        total_rmse = np.sqrt(np.mean(mse_list))
-        mean_success = np.mean(np.array(success_list, 'i'))
-        print(f'Mean RMSE (average RMSE per trajectory) = {mean_rmse*100:03.3f} cm')
-        print(f'Overall RMSE (reported value) = {total_rmse*100:03.3f} cm')
-        print(f'Success rate = {mean_success*100:03.3f} %')
+        mean_rmse = np.mean(np.sqrt(mse_list)) * 100
+        total_rmse = np.sqrt(np.mean(mse_list)) * 100
+        mean_success = np.mean(np.array(success_list, 'i')) * 100
+        print(f'Mean RMSE (average RMSE per trajectory) = {mean_rmse:03.3f} cm')
+        print(f'Overall RMSE (reported value) = {total_rmse:03.3f} cm')
+        print(f'Success rate = {mean_success:03.3f} %')
 
     print('evaluation finished')
 
 if __name__ == '__main__':
     params = arguments.parse_args()
-    
+
     run_evaluation(params)

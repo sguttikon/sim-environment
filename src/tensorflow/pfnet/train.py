@@ -10,7 +10,10 @@ from utils import datautils, arguments, pfnet_loss
 
 np.set_printoptions(precision=3, suppress=True)
 
-def dataset_size():
+def train_dataset_size():
+    return 800
+
+def valid_dataset_size():
     return 800
 
 def run_training(params):
@@ -21,7 +24,8 @@ def run_training(params):
     batch_size = params.batch_size
     num_particles = params.num_particles
     trajlen = params.trajlen
-    num_batches = dataset_size() // batch_size
+    num_train_batches = train_dataset_size() // batch_size
+    num_valid_batches = valid_dataset_size() // batch_size
 
     # training data
     train_ds = datautils.get_dataflow(params.trainfiles, params.batch_size, params.s_buffer_size, is_training=True)
@@ -46,7 +50,7 @@ def run_training(params):
     for epoch in range(params.epochs):
         itr = train_ds.as_numpy_iterator()
         # run training over all training samples in an epoch
-        for idx in tqdm(range(num_batches)):
+        for idx in tqdm(range(num_train_batches)):
             raw_record = next(itr)
             data_sample = datautils.transform_raw_record(raw_record, params)
 
@@ -93,12 +97,13 @@ def run_training(params):
             tf.summary.scalar('loss', train_loss.result(), step=epoch)
 
         # Save the weights
+        print("=====> saving trained model ")
         model.save_weights(params.train_log_dir + f'/chks/checkpoint_{epoch}_{train_loss.result():03.3f}/pfnet_checkpoint')
 
         if params.run_validation:
             itr = train_ds.as_numpy_iterator()
-            # run training over all training samples in an epoch
-            for idx in tqdm(range(iterations)):
+            # run validation over all validation samples in an epoch
+            for idx in tqdm(range(num_valid_batches)):
                 raw_record = next(itr)
                 data_sample = datautils.transform_raw_record(raw_record, params)
 
@@ -110,38 +115,27 @@ def run_training(params):
                 init_particle_weights = tf.constant(np.log(1.0/float(num_particles)),
                                             shape=(batch_size, num_particles), dtype=tf.float32)
 
-                # HACK: tile global map since RNN accepts [batch, time_steps, ...]
-                seg_global_map = tf.tile(tf.expand_dims(global_map, axis=1), [1, bptt_steps, 1, 1, 1])
-
                 # start trajectory with initial particles and weights
-                state = [init_particles, init_particle_weights]
+                state = [init_particles, init_particle_weights, global_map]
 
                 # if stateful: reset RNN s.t. initial_state is set to initial particles and weights
                 # if non-stateful: pass the state explicity every step
                 if params.stateful:
                     model.layers[-1].reset_states(state)    # RNN layer
 
-                t_loss = 0
-                # run validation over small segments of bptt_steps
-                for i in range(num_segments):
-                    seg_labels = true_states[:, i:i+bptt_steps]
+                # run validation over trajectory
+                input = [observation, odometry]
+                model_input = (input, state)
 
-                    seg_obs = observation[:, i:i+bptt_steps]
-                    seg_odom = odometry[:, i:i+bptt_steps]
-                    input = [seg_obs, seg_odom, seg_global_map]
+                # forward pass
+                output, state = model(model_input, training=True)
 
-                    model_input = (input, state)
+                # compute loss
+                particle_states, particle_weights = output
+                loss_dict = pfnet_loss.compute_loss(particle_states, particle_weights, true_states, params.map_pixel_in_meters)
+                loss_pred = loss_dict['pred']
 
-                    # forward pass
-                    output, state = model(model_input, training=False)
-
-                    # compute loss
-                    particle_states, particle_weights = output
-                    loss_dict = pfnet_loss.compute_loss(particle_states, particle_weights, seg_labels, params.map_pixel_in_meters)
-
-                    loss_pred = loss_dict['pred']
-                    t_loss = t_loss + loss_pred
-                test_loss(t_loss)  # overall trajectory loss
+                test_loss(loss_pred)  # overall trajectory loss
 
             # log epoch validation stats
             with test_summary_writer.as_default():
