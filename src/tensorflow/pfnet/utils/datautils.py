@@ -153,10 +153,10 @@ def transform_raw_record(raw_record, params):
         rgbs.append(rgb)
     trans_record['observation'] = np.stack(rgbs)    # (batch_size, trajlen, 56, 56, 3)
 
-    # # process map room id
-    # map_roomids = []
-    # for map_roomid in raw_record['map_roomid']:
-    #     map_roomids.append(process_roomid_map(map_roomid))
+    # process map room id
+    map_roomids = []
+    for map_roomid in raw_record['map_roomid']:
+        map_roomids.append(process_roomid_map(map_roomid))
 
     # process wall map
     map_walls = []
@@ -169,7 +169,8 @@ def transform_raw_record(raw_record, params):
                                         num_particles,
                                         init_particles_distr,
                                         trans_record['true_states'][:, 0, :],
-                                        init_particles_cov
+                                        init_particles_cov,
+                                        map_roomids
                                     )   # (batch_size, num_particles, 3)
 
     # zero pad map wall image
@@ -178,7 +179,7 @@ def transform_raw_record(raw_record, params):
 
     return trans_record
 
-def random_particles(num_particles, particles_distr, state, particles_cov):
+def random_particles(num_particles, particles_distr, state, particles_cov, map_roomids):
     """
     generate a random set of particles
     :param num_particles: number of particles
@@ -187,6 +188,7 @@ def random_particles(num_particles, particles_distr, state, particles_cov):
         one-room - the distribution is uniform over states in room defined by the true state
     :param state: true state (batch_size, 3)
     :param particle_cov: for tracking Gaussian covariance matrix (3, 3)
+    :param map_roomids: list of map of room ids where value define a unique room id for each pixel of the map
     :return np.ndarray: random particles (batch_size, num_particles, 3)
     """
 
@@ -200,11 +202,48 @@ def random_particles(num_particles, particles_distr, state, particles_cov):
 
             # sample particles from the Gaussian, centered around the offset
             particles.append(np.random.multivariate_normal(mean=center, cov=particles_cov, size=num_particles))
+    elif particles_distr == 'one-room':
+
+        # iterate per batch_size
+        for b_idx in range(state.shape[0]):
+            # mask the room the initial state is in
+            roomidmap = map_roomids[b_idx]
+            masked_map = (roomidmap == roomidmap[
+                                        int(np.rint(state[b_idx][0])),
+                                        int(np.rint(state[b_idx][1]))
+                                    ])
+            # get bounding box for more efficient sampling
+            rmin, rmax, cmin, cmax = bounding_box(masked_map)
+
+            # rejection sampling inside bounding box
+            sample_i = 0
+            b_particles = []
+            while sample_i < num_particles:
+                particle = np.random.uniform(low=(rmin, cmin, 0.0), high=(rmax, cmax, 2.0*np.pi), size=(3, ))
+                # reject if mask is zero
+                if not masked_map[int(np.rint(particle[0])), int(np.rint(particle[1]))]:
+                    continue
+                b_particles.append(particle)
+                sample_i = sample_i + 1
+            particles.append(b_particles)
     else:
         raise ValueError
 
     particles = np.stack(particles)
     return particles
+
+def bounding_box(img):
+    """
+    Bounding box of non-zeros in an array.
+    :param img: numpy array
+    :return (int, int, int, int): bounding box indices top_row, bottom_row, left_column, right_column
+    """
+    rows = np.any(img, axis=1)
+    cols = np.any(img, axis=0)
+    rmin, rmax = np.where(rows)[0][[0, -1]]
+    cmin, cmax = np.where(cols)[0][[0, -1]]
+
+    return rmin, rmax, cmin, cmax
 
 def get_dataflow(filenames, batch_size, s_buffer_size=100, is_training=False):
 

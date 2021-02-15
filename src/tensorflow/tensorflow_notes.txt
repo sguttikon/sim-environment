@@ -26,3 +26,13 @@ nohup python train.py --trainfiles '../../data/train.tfrecords' --testfiles '../
 
 
 python eval.py --load './logs/20210212-192446/test/chks/checkpoint_75_0.391/pfnet_checkpoint' --testfiles ../../data/test.tfrecords --batch_size 8 --epochs 1 --num_particles 300 --trajlen 24
+
+results:
+Mean RMSE (average RMSE per trajectory) = 48.832 cm
+Overall RMSE (reported value) = 52.539 cm
+Success rate = 38.000 %
+
+
+python eval.py --load './logs/20210212-192446/test/chks/checkpoint_75_0.391/pfnet_checkpoint' --testfiles ../../data/test.tfrecords --batch_size 8 --epochs 1 --num_particles 500 --trajlen 24 --resample 'true' --alpha_resample_ratio 1.0 --transition_std '0.04' '0.0872665'
+
+python eval.py --load './logs/20210212-192446/test/chks/checkpoint_75_0.391/pfnet_checkpoint' --testfiles ../../data/test.tfrecords --batch_size 8 --epochs 1 --num_particles 500 --trajlen 24 --resample 'true' --alpha_resample_ratio 1.0 --transition_std '0.04' '0.0872665' --init_particles_distr 'one-room'
