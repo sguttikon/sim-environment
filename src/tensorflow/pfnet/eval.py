@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 
+import sys
 import pfnet
 import numpy as np
 from tqdm import tqdm
 import tensorflow as tf
 from utils import datautils, arguments, pfnet_loss
+
+old_stdout = sys.stdout
 
 def dataset_size():
     return 800
@@ -13,6 +16,8 @@ def run_evaluation(params):
     """
     run training with the parsed arguments
     """
+
+    sys.stdout = open("evaluation.log","w")
 
     batch_size = params.batch_size
     num_particles = params.num_particles
@@ -82,6 +87,8 @@ def run_evaluation(params):
         print(f'Overall RMSE (reported value) = {total_rmse:03.3f} cm')
         print(f'Success rate = {mean_success:03.3f} %')
 
+    sys.stdout = old_stdout
+    log_file.close()
     print('evaluation finished')
 
 if __name__ == '__main__':
