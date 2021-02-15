@@ -39,6 +39,7 @@ def parse_args():
     argparser.add_argument('--load', type=str, default="", help='Load a previously trained model from a checkpoint file.')
     argparser.add_argument('--seed', type=int, default='42', help='Fix the random seed of numpy and tensorflow.')
     argparser.add_argument('--logpath', type=str, default='./log/', help='Specify path for logs.')
+    argparser.add_argument('--gpu_num', type=int, default='0', help='use gpu no. to train')
 
     params = argparser.parse_args()
 
@@ -73,12 +74,13 @@ def parse_args():
         params.resample = (params.resample == 'true')
 
     gpus = tf.config.experimental.list_physical_devices('GPU')
+    assert params.gpu_num < len(gpus)
     if gpus:
         # restrict TF to only use the first GPU
         try:
             for gpu in gpus:
                 tf.config.experimental.set_memory_growth(gpu, True)
-            tf.config.experimental.set_visible_devices(gpus[0], 'GPU')
+            tf.config.experimental.set_visible_devices(gpus[params.gpu_num], 'GPU')
             logical_gpus = tf.config.experimental.list_logical_devices('GPU')
         except RuntimeError as e:
             # visible devices must be set before GPUs have been initialized
