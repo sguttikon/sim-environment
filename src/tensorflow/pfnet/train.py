@@ -31,7 +31,7 @@ def run_training(params):
     train_ds = datautils.get_dataflow(params.trainfiles, params.batch_size, params.s_buffer_size, is_training=True)
 
     # validation data
-    test_ds = datautils.get_dataflow(params.testfiles, params.batch_size, is_training=False)
+    test_ds = datautils.get_dataflow(params.testfiles, params.batch_size, params.s_buffer_size, is_training=True)
 
     # pf model
     model = pfnet.pfnet_model(params)
@@ -159,7 +159,7 @@ if __name__ == '__main__':
     params.train_log_dir = 'logs/' + current_time + '/train/'
     params.test_log_dir = 'logs/' + current_time + '/test/'
 
-    params.run_validation = False
+    params.run_validation = True
     params.s_buffer_size = 500
 
     run_training(params)

@@ -22,4 +22,7 @@ Feb 12th 2020
 train_dataset_size = 1000
 valid_dataset_size = 200
 run_validation = True
-nohup python train.py --trainfiles '../../pf_net/tf/data/train.tfrecords' --testfiles '../../pf_net/tf/data/valid.tfrecords' --batch_size 4 --learningrate 0.0001 --epochs 100 --num_particles 30 --trajlen 24 &
+nohup python train.py --trainfiles '../../data/train.tfrecords' --testfiles '../../data/valid.tfrecords' --batch_size 4 --learningrate 0.0001 --epochs 100 --num_particles 30 --trajlen 24 &
+
+
+python eval.py --load './logs/20210212-192446/test/chks/checkpoint_75_0.391/pfnet_checkpoint' --testfiles ../../data/test.tfrecords --batch_size 8 --epochs 1 --num_particles 300 --trajlen 24

@@ -1,1 +1,4 @@
-
+Feb 13th 2020
+-------------
+train_data_size = 48000
+nohup python ddp.py --data_file '../../data/train.tfrecords' --num_epochs 100 --batch_size 48 --num_particles 30 --trajlen 24 --seglen 4 --use_gpus '1' &
