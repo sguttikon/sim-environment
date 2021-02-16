@@ -17,7 +17,8 @@ def run_evaluation(params):
     run training with the parsed arguments
     """
 
-    sys.stdout = open("evaluation.log","w")
+    log_file = open(params.output,'w')
+    sys.stdout = log_file
 
     batch_size = params.batch_size
     num_particles = params.num_particles
@@ -93,5 +94,7 @@ def run_evaluation(params):
 
 if __name__ == '__main__':
     params = arguments.parse_args()
+
+    params.output = 'evaluation.log'
 
     run_evaluation(params)

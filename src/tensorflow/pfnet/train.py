@@ -36,6 +36,11 @@ def run_training(params):
     # pf model
     model = pfnet.pfnet_model(params)
 
+    # load model from checkpoint file
+    if params.load:
+        print("=====> Loading model from " + params.load)
+        model.load_weights(params.load)
+
     # Adam optimizer.
     optimizer = tf.optimizers.Adam(learning_rate=params.learningrate)
 

@@ -36,7 +36,7 @@ def parse_args():
     argparser.add_argument('--learningrate', type=float, default=0.0025, help='Initial learning rate for training.')
     argparser.add_argument('--epochs', type=int, default=1, help='Number of epochs for training.')
 
-    argparser.add_argument('--load', type=str, default="", help='Load a previously trained model from a checkpoint file.')
+    argparser.add_argument('--load', type=str, default='', help='Load a previously trained model from a checkpoint file.')
     argparser.add_argument('--seed', type=int, default='42', help='Fix the random seed of numpy and tensorflow.')
     argparser.add_argument('--logpath', type=str, default='./log/', help='Specify path for logs.')
     argparser.add_argument('--gpu_num', type=int, default='0', help='use gpu no. to train')
