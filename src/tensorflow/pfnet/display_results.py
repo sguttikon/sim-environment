@@ -80,6 +80,8 @@ def display_results(params):
     plt_ax = fig.add_subplot(111)
     canvas = FigureCanvasAgg(fig)
 
+    mse_list = []
+    success_list = []
     itr = test_ds.as_numpy_iterator()
     # run over all evaluation samples in an epoch
     for idx in tqdm(range(num_batches)):
@@ -112,7 +114,18 @@ def display_results(params):
         # forward pass
         output, state = model(model_input, training=False)
 
+        # compute loss
         particle_states, particle_weights = output
+        loss_dict = pfnet_loss.compute_loss(particle_states, particle_weights, true_states, params.map_pixel_in_meters)
+
+        # we have squared differences along the trajectory
+        mse = np.mean(loss_dict['coords'])
+        mse_list.append(mse)
+
+        # localization is successfull if the rmse error is below 1m for the last 25% of the trajectory
+        successful = np.all(loss_dict['coords'][-trajlen//4:] < 1.0 ** 2)  # below 1 meter
+        success_list.append(successful)
+
         lin_weights = tf.nn.softmax(particle_weights, axis=-1)
         est_states = tf.math.reduce_sum(tf.math.multiply(
                             particle_states[:, :, :, :], lin_weights[:, :, :, None]
@@ -154,6 +167,14 @@ def display_results(params):
             out.write(images[i])
             # cv2.imwrite(params.out_folder + f'result_img_{i}.png', images[i])
         out.release()
+
+    # report results
+    mean_rmse = np.mean(np.sqrt(mse_list)) * 100
+    total_rmse = np.sqrt(np.mean(mse_list)) * 100
+    mean_success = np.mean(np.array(success_list, 'i')) * 100
+    print(f'Mean RMSE (average RMSE per trajectory) = {mean_rmse:03.3f} cm')
+    print(f'Overall RMSE (reported value) = {total_rmse:03.3f} cm')
+    print(f'Success rate = {mean_success:03.3f} %')
 
     print('testing finished')
 
