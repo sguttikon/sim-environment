@@ -33,7 +33,7 @@ results:
 Mean RMSE (average RMSE per trajectory) = 48.832 cm
 Overall RMSE (reported value) = 52.539 cm
 Success rate = 38.000 %
-
+--------------------------------------------------------------------------------
 python eval.py --load './logs/20210212-192446/test/chks/checkpoint_75_0.391/pfnet_checkpoint' --testfiles '../../data/test.tfrecords' --batch_size 8 --epochs 1 --num_particles 500 --trajlen 24 --resample 'true' --alpha_resample_ratio 1.0 --transition_std '0.04' '0.0872665' --gpu_num 0
 
 results:
@@ -46,19 +46,26 @@ Feb 16th 2020
 
 python eval.py --load './logs/20210212-192446/test/chks/checkpoint_75_0.391/pfnet_checkpoint' --testfiles '../../data/test.tfrecords' --batch_size 8 --epochs 1 --num_particles 1000 --trajlen 100 --resample 'true' --alpha_resample_ratio 1.0 --transition_std '0.04' '0.0872665' --init_particles_distr 'one-room' --gpu_num 1
 
-
+--------------------------------------------------------------------------------
 python eval.py --load './logs/20210212-192446/test/chks/checkpoint_90_0.289/pfnet_checkpoint' --testfiles '../../data/test.tfrecords' --batch_size 8 --epochs 1 --num_particles 300 --trajlen 24 --gpu_num 0
 
 results:
 Mean RMSE (average RMSE per trajectory) = 46.365 cm
 Overall RMSE (reported value) = 50.251 cm
 Success rate = 47.000 %
-
+--------------------------------------------------------------------------------
 python eval.py --load './logs/20210212-192446/train/chks/checkpoint_99_0.389/pfnet_checkpoint' --testfiles '../../data/test.tfrecords' --batch_size 8 --epochs 1 --num_particles 300 --trajlen 24 --gpu_num 0
 
 results:
 Mean RMSE (average RMSE per trajectory) = 58.229 cm
 Overall RMSE (reported value) = 63.134 cm
 Success rate = 24.000 %
-
+--------------------------------------------------------------------------------
 python eval.py --load './logs/20210212-192446/test/chks/checkpoint_98_0.231/pfnet_checkpoint' --testfiles '../../data/test.tfrecords' --batch_size 8 --epochs 1 --num_particles 300 --trajlen 24 --gpu_num 0
+
+results:
+Mean RMSE (average RMSE per trajectory) = 46.379 cm
+Overall RMSE (reported value) = 50.581 cm
+Success rate = 45.000 %
+--------------------------------------------------------------------------------
+python display_results.py --load ./logs/20210212-192446/test/chks/checkpoint_90_0.289/pfnet_checkpoint --testfiles ../../data/test.tfrecords --batch_size 1 --epochs 1 --num_particles 3000 --trajlen 100 --resample 'true' --alpha_resample_ratio 1.0 --transition_std '0.04' '0.0872665' --init_particles_distr 'one-room' --gpu_num 0

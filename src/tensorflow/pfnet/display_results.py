@@ -59,6 +59,9 @@ def display_results(params):
     display results with the parsed arguments
     """
 
+    log_file = open(params.output,'w')
+    sys.stdout = log_file
+
     batch_size = 1
     num_batches = 2
     num_particles = params.num_particles
@@ -176,11 +179,14 @@ def display_results(params):
     print(f'Overall RMSE (reported value) = {total_rmse:03.3f} cm')
     print(f'Success rate = {mean_success:03.3f} %')
 
+    sys.stdout = old_stdout
+    log_file.close()
     print('testing finished')
 
 if __name__ == '__main__':
     params = arguments.parse_args()
 
+    params.output = 'evaluation.log'
     params.out_folder = './output/'
     Path(params.out_folder).mkdir(parents=True, exist_ok=True)
 
