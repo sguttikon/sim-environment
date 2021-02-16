@@ -5,6 +5,8 @@ import argparse
 import numpy as np
 import tensorflow as tf
 
+np.set_printoptions(precision=3, suppress=True)
+
 def parse_args():
     """
     parse command line arguments

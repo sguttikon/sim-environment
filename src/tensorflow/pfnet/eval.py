@@ -14,7 +14,7 @@ def dataset_size():
 
 def run_evaluation(params):
     """
-    run training with the parsed arguments
+    run evaluation with the parsed arguments
     """
 
     log_file = open(params.output,'w')

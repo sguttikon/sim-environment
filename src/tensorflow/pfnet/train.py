@@ -8,8 +8,6 @@ from tensorflow import keras
 from datetime import datetime
 from utils import datautils, arguments, pfnet_loss
 
-np.set_printoptions(precision=3, suppress=True)
-
 def train_dataset_size():
     return 800
 
