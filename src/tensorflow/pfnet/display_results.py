@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import sys
 import cv2
 import pfnet
 import numpy as np
@@ -59,6 +60,7 @@ def display_results(params):
     display results with the parsed arguments
     """
 
+    old_stdout = sys.stdout
     log_file = open(params.output,'w')
     sys.stdout = log_file
 
@@ -186,7 +188,7 @@ def display_results(params):
 if __name__ == '__main__':
     params = arguments.parse_args()
 
-    params.output = 'evaluation.log'
+    params.output = 'display_results.log'
     params.out_folder = './output/'
     Path(params.out_folder).mkdir(parents=True, exist_ok=True)
 

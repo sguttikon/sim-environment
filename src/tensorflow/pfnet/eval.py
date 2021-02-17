@@ -7,8 +7,6 @@ from tqdm import tqdm
 import tensorflow as tf
 from utils import datautils, arguments, pfnet_loss
 
-old_stdout = sys.stdout
-
 def dataset_size():
     return 800
 
@@ -17,6 +15,7 @@ def run_evaluation(params):
     run evaluation with the parsed arguments
     """
 
+    old_stdout = sys.stdout
     log_file = open(params.output,'w')
     sys.stdout = log_file
 
@@ -95,6 +94,6 @@ def run_evaluation(params):
 if __name__ == '__main__':
     params = arguments.parse_args()
 
-    params.output = 'evaluation.log'
+    params.output = 'evaluation_results.log'
 
     run_evaluation(params)
