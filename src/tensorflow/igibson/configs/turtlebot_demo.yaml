@@ -9,6 +9,9 @@ trav_map_resolution: 0.1
 trav_map_erosion: 3
 should_open_all_doors: true
 
+# particle filter
+num_particles: 1000
+
 # domain randomization
 texture_randomization_freq: null
 object_randomization_freq: null

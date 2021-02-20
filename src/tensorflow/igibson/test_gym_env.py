@@ -13,12 +13,15 @@ if __name__ == '__main__':
     print(env.observation_space)
     print(env.action_space)
 
-    for episode in range(5):
+    np.random.seed(42)
+
+    for episode in range(1):
         print(f'Episode: {episode}')
         state = env.reset()
         print(f'robot pose: {state["pose"]}')
-        for _ in range(20):  # 2 seconds
-            action = [0.5, 0.5] # env.action_space.sample()
+        for _ in range(50):  # 5 seconds
+            env.render()
+            action = env.action_space.sample()
             state, reward, done, _ = env.step(action)
             print(f'robot pose: {state["pose"]}')
     env.close()
