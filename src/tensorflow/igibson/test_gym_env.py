@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
 
-import gym
-import custom_env
+import os
+from iGibson_env import iGibsonEnv
 
 if __name__ == '__main__':
-
-    # create a new gym environment
-    env = gym.make('custom_env:iGibson-v0')
-
-    for _  in range(10):
-        robot_pose, init_particles = env.reset()
-        print(robot_pose)
-
+    config_filename = os.path.join('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src/tensorflow/igibson/configs/', 'turtlebot_demo.yaml')
+    env = iGibsonEnv(config_file=config_filename, mode='gui')
     env.close()
