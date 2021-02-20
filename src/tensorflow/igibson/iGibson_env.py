@@ -26,7 +26,8 @@ class iGibsonEnv(BaseEnv):
         action_timestep=1 / 10.0,
         physics_timestep=1 / 240.0,
         device_idx=0,
-        render_to_tensor=False
+        render_to_tensor=False,
+        num_particles=100
     ):
         """
         :param config_file: config_file path
@@ -36,7 +37,9 @@ class iGibsonEnv(BaseEnv):
         :param physics_timestep: physics timestep for pybullet
         :param device_idx: which GPU to run the simulation and rendering on
         :param render_to_tensor: whether to render directly to pytorch tensors
+        :param num_particles: number of particles
         """
+        # self.num_particles = num_particles
         super(iGibsonEnv, self).__init__(config_file=config_file,
                                          scene_id=scene_id,
                                          mode=mode,
@@ -47,8 +50,8 @@ class iGibsonEnv(BaseEnv):
         self.use_rnd_floor = False
         self.trav_map_resolution = self.config.get('trav_map_resolution', 0.1)
 
-        self.use_plot = True
-        if self.use_plot:
+        self.show_plot = self.config.get('show_plot', False)
+        if self.show_plot:
             # code related to displaying results in matplotlib
             fig = plt.figure(figsize=(7, 7))
             self.plt_ax = fig.add_subplot(111)
@@ -81,7 +84,6 @@ class iGibsonEnv(BaseEnv):
         Load task setup
         """
         self.initial_pos_z_offset = self.config.get('initial_pos_z_offset', 0.1)
-        self.num_particles = self.config.get('num_particles', 100)
 
     def load_observation_space(self):
         """
@@ -100,11 +102,11 @@ class iGibsonEnv(BaseEnv):
         observation_space['pose'] = self.build_obs_space(
                 shape=(3,), low=-np.inf, high=-np.inf)
 
-        observation_space['particles'] = self.build_obs_space(
-                shape=(self.num_particles, 3), low=-np.inf, high=-np.inf)
-
-        observation_space['particles_weights'] = self.build_obs_space(
-                shape=(self.num_particles,), low=-np.inf, high=-np.inf)
+        # observation_space['particles'] = self.build_obs_space(
+        #         shape=(self.num_particles, 3), low=-np.inf, high=-np.inf)
+        #
+        # observation_space['particles_weights'] = self.build_obs_space(
+        #         shape=(self.num_particles,), low=-np.inf, high=-np.inf)
 
         if 'rgb' in self.output:
             observation_space['rgb'] = self.build_obs_space(
@@ -151,8 +153,8 @@ class iGibsonEnv(BaseEnv):
 
         state['floor_map'] = self.scene.floor_map[self.floor_num]
 
-        state['particles'] = self.particles
-        state['particles_weights'] = self.particles_weights
+        # state['particles'] = self.particles
+        # state['particles_weights'] = self.particles_weights
 
         return state
 
@@ -161,7 +163,7 @@ class iGibsonEnv(BaseEnv):
         Render plots
         """
 
-        if self.use_plot:
+        if self.show_plot:
             state = self.get_state()
 
             # environment map
@@ -175,12 +177,12 @@ class iGibsonEnv(BaseEnv):
             position_plt, heading_plt = self.draw_robot_pose(robot_pose, color, position_plt, heading_plt)
             self.robot_gt_plts['robot_position'], self.robot_gt_plts['robot_heading'] = position_plt, heading_plt
 
-            # estimated particles pose
-            particles = state['particles']
-            weights = state['particles_weights']
-            particles_plt = self.robot_est_plts['particles']
-            particles_plt = self.draw_particles_pose(particles, weights, particles_plt)
-            self.robot_est_plts['particles'] = particles_plt
+            # # estimated particles pose
+            # particles = state['particles']
+            # weights = state['particles_weights']
+            # particles_plt = self.robot_est_plts['particles']
+            # particles_plt = self.draw_particles_pose(particles, weights, particles_plt)
+            # self.robot_est_plts['particles'] = particles_plt
 
             plt.draw()
             plt.pause(0.00000000001)
@@ -191,7 +193,7 @@ class iGibsonEnv(BaseEnv):
         """
         super(iGibsonEnv, self).close()
 
-        if self.use_plot:
+        if self.show_plot:
             # to prevent plot from closing after environment is closed
             plt.ioff()
             plt.show()
@@ -241,9 +243,9 @@ class iGibsonEnv(BaseEnv):
         # simulator sync
         self.simulator.sync()
 
-        # initial particles and corresponding weights
-        self.particles = self.get_random_particles(self.num_particles)
-        self.particles_weights = np.full((self.num_particles, ), (1./self.num_particles))
+        # # initial particles and corresponding weights
+        # self.particles = self.get_random_particles(self.num_particles)
+        # self.particles_weights = np.full((self.num_particles, ), (1./self.num_particles))
 
         state = self.get_state()
 

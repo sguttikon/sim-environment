@@ -10,7 +10,7 @@ trav_map_erosion: 3
 should_open_all_doors: true
 
 # particle filter
-num_particles: 1000
+show_plot: false
 
 # domain randomization
 texture_randomization_freq: null
@@ -19,7 +19,7 @@ object_randomization_freq: null
 # robot
 robot: Turtlebot
 is_discrete: false
-velocity: 1.0
+velocity: 2.0
 
 # task
 task: point_nav_random
@@ -52,8 +52,8 @@ output: [task_obs, rgb, depth, scan]
 # ASUS Xtion PRO LIVE
 # https://www.asus.com/us/3D-Sensor/Xtion_PRO_LIVE
 fisheye: false
-image_width: 160
-image_height: 120
+image_width: 56
+image_height: 56
 vertical_fov: 45
 # depth
 depth_low: 0.8
