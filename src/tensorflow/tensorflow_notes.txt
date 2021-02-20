@@ -43,10 +43,6 @@ Success rate = 34.000 %
 
 Feb 16th 2020
 -------------
-
-python eval.py --load './logs/20210212-192446/test/chks/checkpoint_75_0.391/pfnet_checkpoint' --testfiles '../../data/test.tfrecords' --batch_size 8 --epochs 1 --num_particles 1000 --trajlen 100 --resample 'true' --alpha_resample_ratio 1.0 --transition_std '0.04' '0.0872665' --init_particles_distr 'one-room' --gpu_num 1
-
---------------------------------------------------------------------------------
 python eval.py --load './logs/20210212-192446/test/chks/checkpoint_90_0.289/pfnet_checkpoint' --testfiles '../../data/test.tfrecords' --batch_size 8 --epochs 1 --num_particles 300 --trajlen 24 --gpu_num 0
 
 results:
@@ -69,3 +65,50 @@ Overall RMSE (reported value) = 50.581 cm
 Success rate = 45.000 %
 --------------------------------------------------------------------------------
 python display_results.py --load ./logs/20210212-192446/test/chks/checkpoint_90_0.289/pfnet_checkpoint --testfiles ../../data/test.tfrecords --batch_size 1 --epochs 1 --num_particles 3000 --trajlen 100 --resample 'true' --alpha_resample_ratio 1.0 --transition_std '0.04' '0.0872665' --init_particles_distr 'one-room' --gpu_num 0
+
+results:
+Mean RMSE (average RMSE per trajectory) = 281.185 cm
+Overall RMSE (reported value) = 447.164 cm
+Success rate = 0.000 %
+--------------------------------------------------------------------------------
+
+Feb 17th 2020
+-------------
+nohup python display_results.py --load ./logs/20210212-192446/test/chks/checkpoint_90_0.289/pfnet_checkpoint --testfiles ../../data/test.tfrecords --batch_size 1 --epochs 1 --num_particles 500 --trajlen 100 --resample 'true' --alpha_resample_ratio 1.0 --transition_std '0.04' '0.0872665' --init_particles_distr 'one-room' --gpu_num 0 --seed 100 > display_results0.out &
+
+results:
+Mean RMSE (average RMSE per trajectory) = 182.863 cm
+Overall RMSE (reported value) = 194.275 cm
+Success rate = 0.000 %
+Video = output_500
+--------------------------------------------------------------------------------
+nohup python display_results.py --load ./logs/20210212-192446/test/chks/checkpoint_90_0.289/pfnet_checkpoint --testfiles ../../data/test.tfrecords --batch_size 1 --epochs 1 --num_particles 1000 --trajlen 100 --resample 'true' --alpha_resample_ratio 1.0 --transition_std '0.04' '0.0872665' --init_particles_distr 'one-room' --gpu_num 1 --seed 100 > display_results2.out &
+
+results:
+Mean RMSE (average RMSE per trajectory) = 212.844 cm
+Overall RMSE (reported value) = 220.640 cm
+Success rate = 0.000 %
+Video = output_1000
+--------------------------------------------------------------------------------
+nohup python display_results.py --load ./logs/20210212-192446/test/chks/checkpoint_90_0.289/pfnet_checkpoint --testfiles ../../data/test.tfrecords --batch_size 1 --epochs 1 --num_particles 3000 --trajlen 100 --resample 'true' --alpha_resample_ratio 1.0 --transition_std '0.04' '0.0872665' --init_particles_distr 'one-room' --gpu_num 0 --seed 100 > display_results1.out &
+
+results:
+Mean RMSE (average RMSE per trajectory) = 220.021 cm
+Overall RMSE (reported value) = 233.153 cm
+Success rate = 0.000 %
+Video = output_3000
+--------------------------------------------------------------------------------
+nohup python eval.py --load './logs/20210212-192446/test/chks/checkpoint_90_0.289/pfnet_checkpoint' --testfiles '../../data/test.tfrecords' --batch_size 8 --epochs 1 --num_particles 500 --trajlen 100 --resample 'true' --alpha_resample_ratio 1.0 --transition_std '0.04' '0.0872665' --init_particles_distr 'one-room' --gpu_num 0 > evaluation_results0.out &
+
+Mean RMSE (average RMSE per trajectory) = 278.398 cm
+Overall RMSE (reported value) = 314.782 cm
+Success rate = 0.000 %
+
+--------------------------------------------------------------------------------
+
+=======================================
+TODO:
+1. train with igibson dataset
+2. amcl api
+3. train RL agent on trained pfnet
+=======================================
