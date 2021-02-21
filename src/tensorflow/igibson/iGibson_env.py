@@ -9,7 +9,9 @@ import matplotlib.pyplot as plt
 from collections import OrderedDict
 from gibson2.envs.env_base import BaseEnv
 from gibson2.sensors.vision_sensor import VisionSensor
+from gibson2.termination_conditions.timeout import Timeout
 from gibson2.external.pybullet_tools.utils import stable_z_on_aabb
+from gibson2.reward_functions.collision_reward import CollisionReward
 
 class iGibsonEnv(BaseEnv):
     """
@@ -27,8 +29,10 @@ class iGibsonEnv(BaseEnv):
         physics_timestep=1 / 240.0,
         device_idx=0,
         render_to_tensor=False,
+        automatic_reset=False,
         num_particles=100,
-        show_plot=False
+        show_plot=False,
+        max_step=50
     ):
         """
         :param config_file: config_file path
@@ -38,6 +42,7 @@ class iGibsonEnv(BaseEnv):
         :param physics_timestep: physics timestep for pybullet
         :param device_idx: which GPU to run the simulation and rendering on
         :param render_to_tensor: whether to render directly to pytorch tensors
+        :param automatic_reset: whether to automatic reset after an episode finishes
         :param num_particles: number of particles
         :param show_plot: whether to render plots or not
         """
@@ -50,7 +55,16 @@ class iGibsonEnv(BaseEnv):
                                          device_idx=device_idx,
                                          render_to_tensor=render_to_tensor)
         self.use_rnd_floor = False
+        self.automatic_reset = automatic_reset
         self.trav_map_resolution = self.config.get('trav_map_resolution', 0.1)
+
+        self.reward_functions = [
+            CollisionReward(self.config),
+        ]
+        self.termination_conditions = [
+            Timeout(self.config),
+        ]
+        self.termination_conditions[0].max_step = max_step
 
         self.show_plot = show_plot
         if self.show_plot:
@@ -83,12 +97,27 @@ class iGibsonEnv(BaseEnv):
         self.load_task_setup()
         self.load_observation_space()
         self.load_action_space()
+        self.load_miscellaneous_variables()
+
+    def load_miscellaneous_variables(self):
+        """
+        Load miscellaneous variables for book keeping
+        """
+        self.current_step = 0
+        self.collision_links = []
 
     def load_task_setup(self):
         """
         Load task setup
         """
         self.initial_pos_z_offset = self.config.get('initial_pos_z_offset', 0.1)
+
+        # ignore the agent's collision with these body ids
+        self.collision_ignore_body_b_ids = set(
+            self.config.get('collision_ignore_body_b_ids', []))
+        # ignore the agent's collision with these link ids of itself
+        self.collision_ignore_link_a_ids = set(
+            self.config.get('collision_ignore_link_a_ids', []))
 
     def load_observation_space(self):
         """
@@ -219,6 +248,8 @@ class iGibsonEnv(BaseEnv):
         :return: info: info dictionary with any useful information
         """
 
+        self.current_step += 1
+
         robot = self.robots[0]
         body_id = robot.robot_ids[0]
         if action is not None:
@@ -227,11 +258,17 @@ class iGibsonEnv(BaseEnv):
         # run simulation
         self.simulator_step()
         collision_links = list(p.getContactPoints(bodyA=body_id))
+        self.collision_links = self.filter_collision_links(collision_links)
 
-        state = self.get_state()
-        reward = 0
         info = {}
-        done = False
+        state = self.get_state()
+        reward, info = self.get_reward(collision_links, action, info)
+        done, info = self.get_termination(collision_links, action, info)
+        self.populate_info(info)
+
+        if done and self.automatic_reset:
+            info['last_observation'] = state
+            state = self.reset()
 
         return state, reward, done, info
 
@@ -262,6 +299,8 @@ class iGibsonEnv(BaseEnv):
 
         state = self.get_state()
 
+        self.reset_variables()
+
         return state
 
     def reset_scene(self):
@@ -277,6 +316,13 @@ class iGibsonEnv(BaseEnv):
 
         # reset scene floor
         self.scene.reset_floor(floor=self.floor_num)
+
+    def reset_variables(self):
+        """
+        Reset bookkeeping variables for the next new episode
+        """
+        self.current_step = 0
+        self.collision_links = []
 
     def reset_robot(self):
         """
@@ -307,6 +353,9 @@ class iGibsonEnv(BaseEnv):
         initial_pos = pos
         initial_orn = orn
         self.land_robot(robot, initial_pos, initial_orn)
+
+        for reward_function in self.reward_functions:
+            reward_function.reset(None, self)
 
     def sample_random_pose(self):
         """
@@ -436,3 +485,65 @@ class iGibsonEnv(BaseEnv):
 
         particles = np.array(particles).squeeze(axis=0) # [num_particles, 3]
         return particles
+
+    def filter_collision_links(self, collision_links):
+        """
+        Filter out collisions that should be ignored
+        :param collision_links: original collisions, a list of collisions
+        :return: filtered collisions
+        """
+        new_collision_links = []
+        for item in collision_links:
+            # ignore collision with body b
+            if item[2] in self.collision_ignore_body_b_ids:
+                continue
+
+            # ignore collision with robot link a
+            if item[3] in self.collision_ignore_link_a_ids:
+                continue
+
+            # ignore self collision with robot link a (body b is also robot itself)
+            if item[2] == self.robots[0].robot_ids[0] and item[4] in self.collision_ignore_link_a_ids:
+                continue
+            new_collision_links.append(item)
+        return new_collision_links
+
+    def get_reward(self, collision_links=[], action=None, info={}):
+        """
+        Aggreate reward functions
+        :param collision_links: collision links after executing action
+        :param action: the executed action
+        :param info: additional info
+        :return reward: total reward of the current timestep
+        :return info: additional info
+        """
+        reward = 0.0
+        for reward_function in self.reward_functions:
+            reward += reward_function.get_reward(None, self)
+
+        return reward, info
+
+    def get_termination(self, collision_links=[], action=None, info={}):
+        """
+        Aggreate termination conditions
+        :param collision_links: collision links after executing action
+        :param action: the executed action
+        :param info: additional info
+        :return done: whether the episode has terminated
+        :return info: additional info
+        """
+        done = False
+        success = False
+        for condition in self.termination_conditions:
+            d, s = condition.get_termination(None, self)
+            done = done or d
+            success = success or s
+        info['done'] = done
+        info['success'] = success
+        return done, info
+
+    def populate_info(self, info):
+        """
+        Populate info dictionary with any useful information
+        """
+        info['episode_length'] = self.current_step

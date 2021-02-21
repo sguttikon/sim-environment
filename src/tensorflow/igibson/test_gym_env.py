@@ -23,5 +23,5 @@ if __name__ == '__main__':
             env.render()
             action = env.action_space.sample()
             state, reward, done, _ = env.step(action)
-            print(f'robot pose: {state["pose"]}')
+            print(f'robot pose: {state["pose"]}, reward: {reward}, done: {done}')
     env.close()

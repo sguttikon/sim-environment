@@ -9,6 +9,8 @@ def set_path(path: str):
 
 # set programatically the path to 'pfnet' directory (alternately can also set PYTHONPATH)
 set_path('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src/tensorflow/pfnet')
+# set_path('/home/guttikon/awesome_robotics/sim-environment/src/tensorflow/pfnet')
+
 
 import os
 import pfnet
