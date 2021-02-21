@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 
 import gym
-import render
-import datautils
 import numpy as np
 import pybullet as p
 import matplotlib.pyplot as plt
 from collections import OrderedDict
+from utils import render, datautils
 from gibson2.envs.env_base import BaseEnv
 from gibson2.sensors.vision_sensor import VisionSensor
 from gibson2.termination_conditions.timeout import Timeout
