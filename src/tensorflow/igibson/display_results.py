@@ -60,19 +60,19 @@ def store_results(idx, global_map, particle_states, particle_weights, true_state
         position_plt, heading_plt = gt_plt['robot_position'], gt_plt['robot_heading']
         gt_plt['robot_position'], gt_plt['robot_heading'] = render.draw_robot_pose(
                         true_state[0], '#7B241C', plt_ax,
-                        position_plt, heading_plt, params.map_pixel_in_meters)
+                        position_plt, heading_plt, params.trav_map_resolution)
 
         # plot est robot pose
         position_plt, heading_plt = est_plt['robot_position'], est_plt['robot_heading']
         est_plt['robot_position'], est_plt['robot_heading'] = render.draw_robot_pose(
                         est_state[0], '#515A5A', plt_ax,
-                        position_plt, heading_plt, params.map_pixel_in_meters)
+                        position_plt, heading_plt, params.trav_map_resolution)
 
         # plot est pose particles
         particles_plt = est_plt['particles']
         est_plt['particles'] = render.draw_particles_pose(
                             particle_state[0], lin_weight[0],
-                            particles_plt, params.map_pixel_in_meters)
+                            particles_plt, params.trav_map_resolution)
 
         plt_ax.legend([gt_plt['robot_position'], est_plt['robot_position']], ["gt_pose", "est_pose"])
 
@@ -113,8 +113,8 @@ def display_results(params):
 
     # load model from checkpoint file
     if params.pfnet_load:
-        print("=====> Loading pf model from " + params.load)
-        pfnet_model.load_weights(params.load)
+        print("=====> Loading pf model from " + params.pfnet_load)
+        pfnet_model.load_weights(params.pfnet_load)
 
     # get pretrained action model
     if params.agent == 'pretrained' and params.action_load:
@@ -152,7 +152,7 @@ def display_results(params):
 
         # compute loss
         particle_states, particle_weights = output
-        loss_dict = pfnet_loss.compute_loss(particle_states, particle_weights, true_states, params.map_pixel_in_meters)
+        loss_dict = pfnet_loss.compute_loss(particle_states, particle_weights, true_states, params.trav_map_resolution)
 
         # we have squared differences along the trajectory
         mse = np.mean(loss_dict['coords'])
