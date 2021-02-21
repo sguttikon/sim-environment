@@ -41,7 +41,9 @@ def run_training(params):
     num_valid_batches = valid_dataset_size() // batch_size
 
     # create gym env
-    env = iGibsonEnv(config_file=params.config_filename, mode=params.mode)
+    env = iGibsonEnv(config_file=params.config_filename, mode=params.mode,
+                action_timestep=1 / 10.0, physics_timestep=1 / 240.0,
+                device_idx=params.gpu_num)
 
     # create pf model
     model = pfnet.pfnet_model(params)
@@ -170,7 +172,7 @@ if __name__ == '__main__':
 
     params.run_validation = True
     params.mode = 'headless'
-    params.config_filename = os.path.join('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src/tensorflow/igibson/configs/', 'turtlebot_demo.yaml')
+    params.config_filename = os.path.join('./configs/', 'turtlebot_demo.yaml')
 
     params.output = 'training_results.log'
 

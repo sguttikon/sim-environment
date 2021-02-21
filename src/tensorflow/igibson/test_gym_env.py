@@ -8,8 +8,8 @@ from iGibson_env import iGibsonEnv
 np.set_printoptions(precision=5, suppress=True)
 
 if __name__ == '__main__':
-    config_filename = os.path.join('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src/tensorflow/igibson/configs/', 'turtlebot_demo.yaml')
-    env = iGibsonEnv(config_file=config_filename, mode='gui')
+    config_filename = os.path.join('./configs/', 'turtlebot_demo.yaml')
+    env = iGibsonEnv(config_file=config_filename, mode='headless')
     print(env.observation_space)
     print(env.action_space)
 
