@@ -196,7 +196,10 @@ class iGibsonEnv(BaseEnv):
             for modality in vision_obs:
                 obs[modality] = vision_obs[modality]
 
-        return obs['rgb']   # rgb image
+        # process image for training
+        rgb = datautils.process_raw_image(obs['rgb'])
+        
+        return rgb  # rgb image
 
     def get_floor_map(self):
         """
@@ -204,6 +207,8 @@ class iGibsonEnv(BaseEnv):
         :return ndarray: floor map of current scene (H, W, 1)
         """
         floor_map = self.scene.floor_map[self.floor_num]
+        # process image for training
+        floor_map = datautils.process_floor_map(floor_map)
 
         return floor_map
 

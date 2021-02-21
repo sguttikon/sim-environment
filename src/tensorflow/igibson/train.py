@@ -173,7 +173,7 @@ if __name__ == '__main__':
     params.test_log_dir = 'logs/' + current_time + '/test/'
 
     params.mode = 'headless'
-    params.manual_action = False
+    params.agent = 'random'
     params.run_validation = True
     params.config_filename = os.path.join('./configs/', 'turtlebot_demo.yaml')
 

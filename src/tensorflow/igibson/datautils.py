@@ -3,6 +3,8 @@
 import cv2
 import numpy as np
 import pybullet as p
+from stable_baselines3 import PPO
+from stable_baselines3.ppo import MlpPolicy
 
 def normalize(angle):
     """
@@ -111,18 +113,17 @@ def normalize_observation(x):
     else:   # rgb
         return x * (2.0 / 255.0) - 1.0
 
-def raw_images_to_array(images):
+def process_raw_image(image):
     """
-    Decode and normalize multiple images
-    :param images: list of images encoded as a png
-    :return np.ndarray: images (N, 56, 56, ch) normalized for training
+    Decode and normalize image
+    :param image: image encoded as a png (H, W, ch)
+    :return np.ndarray: images (56, 56, ch) normalized for training
     """
-    image_list = []
-    for image_str in images:
-        image = decode_image(image_str, (56, 56))
-        image = normalize_observation(np.atleast_3d(image.astype(np.float32)))
-        image_list.append(image)
-    return np.stack(image_list)
+
+    image = decode_image(image, (56, 56))
+    image = normalize_observation(np.atleast_3d(image.astype(np.float32)))
+
+    return image
 
 def get_discrete_action():
     """
@@ -142,16 +143,27 @@ def get_discrete_action():
         action = 3  # left
     return action
 
-def gather_episode_stats(env, params):
+def load_action_model(env, path):
+    """
+    Initialize pretrained action sampler model
+    """
+
+    model = PPO(MlpPolicy, env, verbose=1)
+    model = PPO.load(path)
+
+    return model
+
+def gather_episode_stats(env, params, action_model):
     """
     Run the gym environment and collect the required stats
     :param params: parsed parameters
+    :param action_model: pretrained action sampler model
     :return dict: episode stats data containing:
         odometry, true poses, observation, particles, particles weights, floor map
     """
 
+    agent = params.agent
     trajlen = params.trajlen
-    use_manual = params.manual_action
     num_particles = params.num_particles
     particles_cov = params.init_particles_cov
     particles_distr = params.init_particles_distr
@@ -160,36 +172,41 @@ def gather_episode_stats(env, params):
     true_poses = []
     observation = []
 
-    state = env.reset()
+    obs = env.reset()   # already processed
+    observation.append(obs)
 
-    global_map = state['floor_map']
+    global_map = env.get_floor_map()    # already processed
 
-    rgb = state['rgb']
-    observation.append(rgb)
-
-    old_pose = state['pose']
+    old_pose = env.get_robot_state()['pose']
     true_poses.append(old_pose)
 
     for _ in range(trajlen-1):
-        if use_manual:
+        if agent == 'manual':
             action = get_discrete_action()
+        elif agent == 'pretrained':
+            action, _ = action_model.predict(obs)
         else:
+            # default random action
             action = env.action_space.sample()
-        state, reward, done, _ = env.step(action)
 
-        rgb = state['rgb']
-        observation.append(rgb)
+        # take action and get new observation
+        obs, reward, done, _ = env.step(action)
+        observation.append(obs)
 
-        new_pose = state['pose']
+        # get new robot state after taking action
+        new_pose = env.get_robot_state()['pose']
         true_poses.append(new_pose)
 
+        # calculate actual odometry b/w old pose and new pose
         odom = calc_odometry(old_pose, new_pose)
         odometry.append(odom)
         old_pose = new_pose
 
+    # end of episode
     odom = calc_odometry(old_pose, new_pose)
     odometry.append(odom)
 
+    # sample random particles and corresponding weights
     if particles_distr == 'uniform':
         init_particles = env.get_random_particles(num_particles)
     elif particles_distr == 'gaussian':
@@ -197,19 +214,20 @@ def gather_episode_stats(env, params):
     init_particles_weights = np.full((num_particles, ), (1./num_particles))
 
     episode_data = {}
+    episode_data['global_map'] = global_map # (height, width, 1)
     episode_data['odometry'] = np.stack(odometry)  # (trajlen, 3)
     episode_data['init_particles'] = init_particles   # (num_particles, 3)
     episode_data['true_states'] = np.stack(true_poses)  # (trajlen, 3)
-    episode_data['global_map'] = process_floor_map(global_map) # (height, width, 1)
-    episode_data['observation'] = raw_images_to_array(observation) # (trajlen, height, width, 3)
+    episode_data['observation'] = np.stack(observation) # (trajlen, height, width, 3)
     episode_data['init_particles_weights'] = init_particles_weights   # (num_particles,)
 
     return episode_data
 
-def get_batch_data(env, params):
+def get_batch_data(env, params, action_model):
     """
     Gather batch of episode stats
     :param params: parsed parameters
+    :param action_model: pretrained action sampler model
     :return dict: episode stats data containing:
         odometry, true poses, observation, particles, particles weights, floor map
     """
@@ -227,7 +245,7 @@ def get_batch_data(env, params):
     init_particles_weights = []
 
     for _ in range(batch_size):
-        episode_data = gather_episode_stats(env, params)
+        episode_data = gather_episode_stats(env, params, action_model)
 
         odometry.append(episode_data['odometry'])
         global_map.append(episode_data['global_map'])

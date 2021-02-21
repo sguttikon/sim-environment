@@ -106,7 +106,7 @@ def display_results(params):
     # create gym env
     env = iGibsonEnv(config_file=params.config_filename, mode=params.mode,
                 action_timestep=1 / 10.0, physics_timestep=1 / 240.0,
-                device_idx=params.gpu_num)
+                device_idx=params.gpu_num, max_step=params.max_step)
 
     # create pf model
     model = pfnet.pfnet_model(params)
@@ -116,11 +116,14 @@ def display_results(params):
         print("=====> Loading model from " + params.load)
         model.load_weights(params.load)
 
+    # get pretrained action model
+    action_model = datautils.load_action_model(env, params.action_load)
+
     mse_list = []
     success_list = []
     # run over all evaluation samples in an epoch
     for idx in tqdm(range(num_test_batches)):
-        batch_sample = datautils.get_batch_data(env, params)
+        batch_sample = datautils.get_batch_data(env, params, action_model)
 
         odometry = tf.convert_to_tensor(batch_sample['odometry'], dtype=tf.float32)
         global_map = tf.convert_to_tensor(batch_sample['global_map'], dtype=tf.float32)
@@ -178,9 +181,11 @@ if __name__ == '__main__':
     params = arguments.parse_args()
 
     params.batch_size = 1
+    params.max_step = 100
     params.mode = 'headless'
-    params.manual_action = False
+    params.agent = 'pretrained'
     params.out_folder = './output/'
+    params.action_load = './ppo_igibson'
     params.output = 'display_results.log'
     params.config_filename = os.path.join('./configs/', 'turtlebot_demo.yaml')
 
