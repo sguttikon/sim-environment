@@ -198,7 +198,7 @@ class iGibsonEnv(BaseEnv):
 
         # process image for training
         rgb = datautils.process_raw_image(obs['rgb'])
-        
+
         return rgb  # rgb image
 
     def get_floor_map(self):
@@ -241,7 +241,7 @@ class iGibsonEnv(BaseEnv):
 
             # environment map
             map_plt = self.trav_map_plt
-            floor_map = datautils.process_floor_map(floor_map)[:, :, 0]    # [H, W]
+            floor_map = floor_map[:, :, 0]    # [H, W]
             map_plt = render.draw_floor_map(floor_map, self.plt_ax, map_plt)
             self.trav_map_plt = map_plt
 

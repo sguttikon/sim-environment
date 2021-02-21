@@ -50,6 +50,9 @@ def run_training(params):
     # create pf model
     model = pfnet.pfnet_model(params)
 
+    # get pretrained action model
+    action_model = datautils.load_action_model(env, params.gpu_num, params.action_load)
+
     # Adam optimizer.
     optimizer = tf.optimizers.Adam(learning_rate=params.learningrate)
 
@@ -64,7 +67,7 @@ def run_training(params):
     for epoch in range(params.epochs):
         # run training over all training samples in an epoch
         for idx in tqdm(range(num_train_batches)):
-            batch_sample = datautils.get_batch_data(env, params)
+            batch_sample = datautils.get_batch_data(env, params, action_model)
 
             odometry = tf.convert_to_tensor(batch_sample['odometry'], dtype=tf.float32)
             global_map = tf.convert_to_tensor(batch_sample['global_map'], dtype=tf.float32)
@@ -173,8 +176,9 @@ if __name__ == '__main__':
     params.test_log_dir = 'logs/' + current_time + '/test/'
 
     params.mode = 'headless'
-    params.agent = 'random'
+    params.agent = 'pretrained'
     params.run_validation = True
+    params.action_load = './ppo_igibson'
     params.config_filename = os.path.join('./configs/', 'turtlebot_demo.yaml')
 
     params.output = 'training_results.log'

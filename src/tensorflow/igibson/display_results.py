@@ -117,7 +117,7 @@ def display_results(params):
         model.load_weights(params.load)
 
     # get pretrained action model
-    action_model = datautils.load_action_model(env, params.action_load)
+    action_model = datautils.load_action_model(env, params.gpu_num, params.action_load)
 
     mse_list = []
     success_list = []

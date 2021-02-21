@@ -143,12 +143,12 @@ def get_discrete_action():
         action = 3  # left
     return action
 
-def load_action_model(env, path):
+def load_action_model(env, device, path):
     """
     Initialize pretrained action sampler model
     """
 
-    model = PPO(MlpPolicy, env, verbose=1)
+    model = PPO(MlpPolicy, env, verbose=1, device=device)
     model = PPO.load(path)
 
     return model
