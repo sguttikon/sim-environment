@@ -9,7 +9,7 @@ np.set_printoptions(precision=5, suppress=True)
 
 if __name__ == '__main__':
     config_filename = os.path.join('./configs/', 'turtlebot_demo.yaml')
-    env = iGibsonEnv(config_file=config_filename, mode='headless')
+    env = iGibsonEnv(config_file=config_filename, mode='headless', show_plot=True)
     print(env.observation_space)
     print(env.action_space)
 

@@ -21,9 +21,9 @@ def parse_args():
     argparser.add_argument('--testfiles', nargs='*', default=['./data/valid.tfrecords'], help='Data file(s) for validation or evaluation (tfrecord).')
 
     # input configuration
-    argparser.add_argument('--map_pixel_in_meters', type=float, default=0.02, help='The width (and height) of a pixel of the map in meters. Defaults to 0.02 for House3D data.')
+    argparser.add_argument('--map_pixel_in_meters', type=float, default=0.1, help='The width (and height) of a pixel of the map in meters. Defaults to 0.1 for iGibson environment.')
 
-    argparser.add_argument('--init_particles_distr', type=str, default='tracking', help='Distribution of initial particles. Possible values: tracking / one-room.')
+    argparser.add_argument('--init_particles_distr', type=str, default='uniform', help='Distribution of initial particles. Possible values: gaussian / uniform.')
     argparser.add_argument('--init_particles_std', nargs='*', default=["0.3", "0.523599"], help='Standard deviations for generated initial particles for tracking distribution. Values: translation std (meters), rotation std (radians)')
     argparser.add_argument('--trajlen', type=int, default=24, help='Length of trajectories.')
 
@@ -63,8 +63,8 @@ def parse_args():
     params.stateful = False
     params.return_state = True
 
-    #HACK hardcode fix padding for map
-    params.global_map_size = (4000, 4000, 1)
+    #HACK hardcode for floor map
+    params.global_map_size = (100, 100, 1)
 
     # filter out info and warning messages
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'

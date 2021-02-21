@@ -9,16 +9,13 @@ trav_map_resolution: 0.1
 trav_map_erosion: 3
 should_open_all_doors: true
 
-# particle filter
-show_plot: false
-
 # domain randomization
 texture_randomization_freq: null
 object_randomization_freq: null
 
 # robot
 robot: Turtlebot
-is_discrete: false
+is_discrete: true
 velocity: 2.0
 
 # task

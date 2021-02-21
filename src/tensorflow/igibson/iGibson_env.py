@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 
 import gym
+import render
+import datautils
 import numpy as np
 import pybullet as p
-import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 from collections import OrderedDict
-from matplotlib.patches import Wedge
 from gibson2.envs.env_base import BaseEnv
 from gibson2.sensors.vision_sensor import VisionSensor
 from gibson2.external.pybullet_tools.utils import stable_z_on_aabb
@@ -27,7 +27,8 @@ class iGibsonEnv(BaseEnv):
         physics_timestep=1 / 240.0,
         device_idx=0,
         render_to_tensor=False,
-        num_particles=100
+        num_particles=100,
+        show_plot=False
     ):
         """
         :param config_file: config_file path
@@ -38,6 +39,7 @@ class iGibsonEnv(BaseEnv):
         :param device_idx: which GPU to run the simulation and rendering on
         :param render_to_tensor: whether to render directly to pytorch tensors
         :param num_particles: number of particles
+        :param show_plot: whether to render plots or not
         """
         # self.num_particles = num_particles
         super(iGibsonEnv, self).__init__(config_file=config_file,
@@ -50,7 +52,7 @@ class iGibsonEnv(BaseEnv):
         self.use_rnd_floor = False
         self.trav_map_resolution = self.config.get('trav_map_resolution', 0.1)
 
-        self.show_plot = self.config.get('show_plot', False)
+        self.show_plot = show_plot
         if self.show_plot:
             # code related to displaying results in matplotlib
             fig = plt.figure(figsize=(7, 7))
@@ -68,6 +70,9 @@ class iGibsonEnv(BaseEnv):
                 'robot_heading': None,
                 'particles': None,
             }
+
+            plt.draw()
+            plt.pause(0.00000000001)
 
     def load(self):
         """
@@ -167,22 +172,26 @@ class iGibsonEnv(BaseEnv):
             state = self.get_state()
 
             # environment map
-            floor_map = state['floor_map']
-            self.trav_map_plt = self.draw_floor_map(floor_map, self.trav_map_plt)
+            map_plt = self.trav_map_plt
+            floor_map = datautils.process_floor_map(state['floor_map'])[:, :, 0]    # [H, W]
+            map_plt = render.draw_floor_map(floor_map, self.plt_ax, map_plt)
+            self.trav_map_plt = map_plt
 
             # ground truth robot pose and heading
             color = '#7B241C'
             robot_pose = state['pose']
             position_plt, heading_plt = self.robot_gt_plts['robot_position'], self.robot_gt_plts['robot_heading']
-            position_plt, heading_plt = self.draw_robot_pose(robot_pose, color, position_plt, heading_plt)
+            position_plt, heading_plt = render.draw_robot_pose(robot_pose, color, self.plt_ax, position_plt, heading_plt, self.trav_map_resolution)
             self.robot_gt_plts['robot_position'], self.robot_gt_plts['robot_heading'] = position_plt, heading_plt
 
             # # estimated particles pose
             # particles = state['particles']
             # weights = state['particles_weights']
             # particles_plt = self.robot_est_plts['particles']
-            # particles_plt = self.draw_particles_pose(particles, weights, particles_plt)
+            # particles_plt = render.draw_particles_pose(particles, weights, particles_plt, self.trav_map_resolution)
             # self.robot_est_plts['particles'] = particles_plt
+
+            # plt_ax.legend([gt_plt['robot_position'], est_plt['robot_position']], ["gt_pose", "est_pose"])
 
             plt.draw()
             plt.pause(0.00000000001)
@@ -230,6 +239,10 @@ class iGibsonEnv(BaseEnv):
         """
         Reset episode
         """
+
+        if self.show_plot:
+            #clear subplots
+            self.plt_ax.cla()
 
         # move robot away from the scene
         self.robots[0].set_position([100.0, 100.0, 100.0])
@@ -390,12 +403,13 @@ class iGibsonEnv(BaseEnv):
 
         return len(collisions) == 0
 
-    def get_random_particles(self, num_particles, robot_pose=None):
+    def get_random_particles(self, num_particles, robot_pose=None, particles_cov=None):
         """
         Sample random particles based on the scene
         :param robot_pose: ndarray indicating the robot pose
             if None, random particle poses are sampled using unifrom distribution
             otherwise, sampled using gaussian distribution around the robot_pose
+        :param particles_cov: for tracking Gaussian covariance matrix (3, 3)
         :param num_particles: integer indicating the number of random particles
         :return ndarray: random particle poses
         """
@@ -416,82 +430,3 @@ class iGibsonEnv(BaseEnv):
 
         particles = np.array(particles)
         return particles
-
-    def draw_floor_map(self, floor_map, map_plt):
-        """
-        Render the scene floor map
-        :param ndarray floor_map: environment scene floor map
-        :return matplotlib.image.AxesImage: updated plot of scene floor map
-        """
-
-        height, width = floor_map.shape
-        orign_x, orign_y = 0, 0
-
-        # offset the map to display correctly w.r.t origin
-        x_max = width/2 + orign_x
-        x_min = -width/2 + orign_x
-        y_max = height/2 + orign_y
-        y_min = -height/2 + orign_y
-        extent = [x_min, x_max, y_min, y_max]
-
-        if map_plt is None:
-            # draw floor map
-            floor_map = (255 - floor_map)   # invert image
-            map_plt = self.plt_ax.imshow(floor_map, cmap=plt.cm.binary, origin='lower', extent=extent)
-        else:
-            # do nothing
-            pass
-        return map_plt
-
-    def draw_particles_pose(self, particles, weights, particles_plt):
-        """
-        Render the particle poses on the scene floor map
-        :param ndarray particles: estimates of particle pose
-        :param ndarray weights: corresponding weights of particle pose estimates
-        :param matplotlib.collections.PathCollection: plot of particle position color coded according to weights
-        :return matplotlib.collections.PathCollection: updated plot of particles
-        """
-
-        pos = particles[:, 0:2] / self.trav_map_resolution # [num, x, y]
-        color = cm.rainbow(weights)
-
-        if particles_plt is None:
-            # render particles positions with color
-            particles_plt = plt.scatter(pos[:, 0], pos[:, 1], s=10, c=color, alpha=.4)
-        else:
-            # update existing particles positions and color
-            particles_plt.set_offsets(pos)
-            particles_plt.set_color(color)
-
-        return particles_plt
-
-    def draw_robot_pose(self, robot_pose, color, position_plt, heading_plt):
-        """
-        Render the robot pose on the scene floor map
-        :param ndarray robot_pose: ndarray representing robot position (x, y) and heading (theta)
-        :param matplotlib.patches.Wedge position_plt: plot of robot position
-        :param matplotlib.lines.Line2D heading_plt: plot of robot heading
-        :param str color: color used to render robot position and heading
-        :return tuple(matplotlib.patches.Wedge, matplotlib.lines.Line2D): updated position and heading plot of robot
-        """
-
-        x, y, heading = robot_pose
-
-        x = x / self.trav_map_resolution
-        y = y / self.trav_map_resolution
-
-        heading_len  = robot_radius = 1.0
-        xdata = [x, x + (robot_radius + heading_len) * np.cos(heading)]
-        ydata = [y, y + (robot_radius + heading_len) * np.sin(heading)]
-
-        if position_plt == None:
-            # render robot position and heading with color
-            position_plt = Wedge((x, y), robot_radius, 0, 360, color=color, alpha=0.5)
-            self.plt_ax.add_artist(position_plt)
-            heading_plt, = self.plt_ax.plot(xdata, ydata, color=color, alpha=0.5)
-        else:
-            # update existing robot position and heading
-            position_plt.update({'center': [x, y]})
-            heading_plt.update({'xdata': xdata, 'ydata': ydata})
-
-        return position_plt, heading_plt
