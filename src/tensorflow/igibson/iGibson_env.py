@@ -127,32 +127,47 @@ class iGibsonEnv(BaseEnv):
         self.image_width = self.config.get('image_width', 128)
         self.image_height = self.config.get('image_height', 128)
 
-        observation_space = OrderedDict()
+        # observation_space = OrderedDict()
+        # sensors = OrderedDict()
+        # vision_modalities = []
+        # scan_modalities = []
+        #
+        # # initialize observation space
+        # observation_space['pose'] = self.build_obs_space(
+        #         shape=(3,), low=-np.inf, high=-np.inf)
+        #
+        # # observation_space['particles'] = self.build_obs_space(
+        # #         shape=(self.num_particles, 3), low=-np.inf, high=-np.inf)
+        # #
+        # # observation_space['particles_weights'] = self.build_obs_space(
+        # #         shape=(self.num_particles,), low=-np.inf, high=-np.inf)
+        #
+        # if 'rgb' in self.output:
+        #     observation_space['rgb'] = self.build_obs_space(
+        #         shape=(self.image_height, self.image_width, 3),
+        #         low=0.0, high=1.0)
+        #     vision_modalities.append('rgb')
+        #
+        # # initialize sensors
+        # if len(vision_modalities) > 0:
+        #     sensors['vision'] = VisionSensor(self, vision_modalities)
+        #
+        # self.observation_space = gym.spaces.Dict(observation_space)
+        # self.sensors = sensors
+
         sensors = OrderedDict()
+
         vision_modalities = []
         scan_modalities = []
 
-        # initialize observation space
-        observation_space['pose'] = self.build_obs_space(
-                shape=(3,), low=-np.inf, high=-np.inf)
-
-        # observation_space['particles'] = self.build_obs_space(
-        #         shape=(self.num_particles, 3), low=-np.inf, high=-np.inf)
-        #
-        # observation_space['particles_weights'] = self.build_obs_space(
-        #         shape=(self.num_particles,), low=-np.inf, high=-np.inf)
-
-        if 'rgb' in self.output:
-            observation_space['rgb'] = self.build_obs_space(
+        self.observation_space = self.build_obs_space(
                 shape=(self.image_height, self.image_width, 3),
                 low=0.0, high=1.0)
-            vision_modalities.append('rgb')
+        vision_modalities.append('rgb')
 
         # initialize sensors
         if len(vision_modalities) > 0:
             sensors['vision'] = VisionSensor(self, vision_modalities)
-
-        self.observation_space = gym.spaces.Dict(observation_space)
         self.sensors = sensors
 
     def build_obs_space(self, shape, low, high):
@@ -168,29 +183,47 @@ class iGibsonEnv(BaseEnv):
         """
         self.action_space = self.robots[0].action_space
 
-    def get_state(self):
+    def get_observation(self):
         """
         Get the current observation
-        :return: observation as a dictionary
+        :return ndarray: rgb observation (H, W, 3)
         """
-        state = OrderedDict()
+
+        obs = OrderedDict()
 
         if 'vision' in self.sensors:
             vision_obs = self.sensors['vision'].get_obs(self)
             for modality in vision_obs:
-                state[modality] = vision_obs[modality]
+                obs[modality] = vision_obs[modality]
+
+        return obs['rgb']   # rgb image
+
+    def get_floor_map(self):
+        """
+        Get the scene floor map
+        :return ndarray: floor map of current scene (H, W, 1)
+        """
+        floor_map = self.scene.floor_map[self.floor_num]
+
+        return floor_map
+
+    def get_robot_state(self):
+        """
+        Get the current robot state
+        :return dict: state of robot as a dictionary
+            containing: gt pose
+        """
+        robot_state = OrderedDict()
 
         # robot_state = self.robots[0].calc_state()
         robot_pos = self.robots[0].get_position()   # [x, y, z]
         robot_orn = p.getEulerFromQuaternion(self.robots[0].get_orientation())  # [r, p, y]
-        state['pose'] = np.array([robot_pos[0], robot_pos[1], robot_orn[2]])  # [x, y, theta]
+        robot_state['pose'] = np.array([robot_pos[0], robot_pos[1], robot_orn[2]])  # [x, y, theta]
 
-        state['floor_map'] = self.scene.floor_map[self.floor_num]
+        # robot_state['particles'] = self.particles
+        # robot_state['particles_weights'] = self.particles_weights
 
-        # state['particles'] = self.particles
-        # state['particles_weights'] = self.particles_weights
-
-        return state
+        return robot_state
 
     def render(self, mode='human'):
         """
@@ -198,24 +231,25 @@ class iGibsonEnv(BaseEnv):
         """
 
         if self.show_plot:
-            state = self.get_state()
+            floor_map = self.get_floor_map()
+            robot_state = self.get_robot_state()
 
             # environment map
             map_plt = self.trav_map_plt
-            floor_map = datautils.process_floor_map(state['floor_map'])[:, :, 0]    # [H, W]
+            floor_map = datautils.process_floor_map(floor_map)[:, :, 0]    # [H, W]
             map_plt = render.draw_floor_map(floor_map, self.plt_ax, map_plt)
             self.trav_map_plt = map_plt
 
             # ground truth robot pose and heading
             color = '#7B241C'
-            robot_pose = state['pose']
+            robot_pose = robot_state['pose']
             position_plt, heading_plt = self.robot_gt_plts['robot_position'], self.robot_gt_plts['robot_heading']
             position_plt, heading_plt = render.draw_robot_pose(robot_pose, color, self.plt_ax, position_plt, heading_plt, self.trav_map_resolution)
             self.robot_gt_plts['robot_position'], self.robot_gt_plts['robot_heading'] = position_plt, heading_plt
 
             # # estimated particles pose
-            # particles = state['particles']
-            # weights = state['particles_weights']
+            # particles = robot_state['particles']
+            # weights = robot_state['particles_weights']
             # particles_plt = self.robot_est_plts['particles']
             # particles_plt = render.draw_particles_pose(particles, weights, particles_plt, self.trav_map_resolution)
             # self.robot_est_plts['particles'] = particles_plt
@@ -261,7 +295,7 @@ class iGibsonEnv(BaseEnv):
         self.collision_links = self.filter_collision_links(collision_links)
 
         info = {}
-        state = self.get_state()
+        state = self.get_observation()
         reward, info = self.get_reward(collision_links, action, info)
         done, info = self.get_termination(collision_links, action, info)
         self.populate_info(info)
@@ -297,7 +331,7 @@ class iGibsonEnv(BaseEnv):
         # self.particles = self.get_random_particles(self.num_particles)
         # self.particles_weights = np.full((self.num_particles, ), (1./self.num_particles))
 
-        state = self.get_state()
+        state = self.get_observation()
 
         self.reset_variables()
 
