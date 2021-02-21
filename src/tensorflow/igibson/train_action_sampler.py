@@ -5,7 +5,7 @@ from stable_baselines3 import PPO
 from iGibson_env import iGibsonEnv
 from stable_baselines3.ppo import MlpPolicy
 
-def train_agent(timesteps, max_step):
+def train_action_sampler(timesteps, max_step):
     config_filename = os.path.join('./configs/', 'turtlebot_demo.yaml')
     env = iGibsonEnv(config_file=config_filename, mode='headless', max_step=max_step)
 
@@ -19,9 +19,9 @@ def train_agent(timesteps, max_step):
 
     print('training finished')
 
-def test_agent(max_step):
+def test_action_sampler(max_step):
     config_filename = os.path.join('./configs/', 'turtlebot_demo.yaml')
-    env = iGibsonEnv(config_file=config_filename, mode='headless', show_plot=True, , max_step=max_step)
+    env = iGibsonEnv(config_file=config_filename, mode='headless', show_plot=True, max_step=max_step)
 
     # Test the agent
     model = PPO.load('ppo_igibson')
@@ -39,5 +39,5 @@ def test_agent(max_step):
     print('training finished')
 
 if __name__ == '__main__':
-    train_agent(timesteps=25000, max_step=100)
-    test_agent(max_step=100)
+    train_action_sampler(timesteps=50000, max_step=100)
+    test_action_sampler(max_step=100)
