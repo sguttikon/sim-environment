@@ -117,7 +117,7 @@ def display_results(params):
         pfnet_model.load_weights(params.load)
 
     # get pretrained action model
-    if params.action_load:
+    if params.agent == 'pretrained' and params.action_load:
         print("=====> Loading action sampler from " + params.action_load)
         action_model = datautils.load_action_model(env, params.gpu_num, params.action_load)
     else:

@@ -51,7 +51,7 @@ def run_training(params):
     pfnet_model = pfnet.pfnet_model(params)
 
     # get pretrained action model
-    if params.action_load:
+    if params.agent == 'pretrained' and params.action_load:
         print("=====> Loading action sampler from " + params.action_load)
         action_model = datautils.load_action_model(env, params.gpu_num, params.action_load)
     else:
