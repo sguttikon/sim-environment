@@ -512,6 +512,7 @@ class iGibsonEnv(BaseEnv):
                 particles.append([pos[0], pos[1], orn[2]])  # [x, y, theta]
 
                 sample_i = sample_i + 1
+            particles = np.array(particles) # [num_particles, 3]
         else:
             # gaussian distribution
             assert list(robot_pose.shape) == [3]
@@ -522,7 +523,7 @@ class iGibsonEnv(BaseEnv):
             # sample particles from the Gaussian, centered around the offset
             particles.append(np.random.multivariate_normal(mean=center, cov=particles_cov, size=num_particles))
 
-        particles = np.array(particles).squeeze(axis=0) # [num_particles, 3]
+            particles = np.array(particles).squeeze(axis=0) # [num_particles, 3]
         return particles
 
     def filter_collision_links(self, collision_links):

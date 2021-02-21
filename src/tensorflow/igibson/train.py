@@ -45,13 +45,17 @@ def run_training(params):
     # create gym env
     env = iGibsonEnv(config_file=params.config_filename, mode=params.mode,
                 action_timestep=1 / 10.0, physics_timestep=1 / 240.0,
-                device_idx=params.gpu_num)
+                device_idx=params.gpu_num, max_step=params.max_step)
 
     # create pf model
-    model = pfnet.pfnet_model(params)
+    pfnet_model = pfnet.pfnet_model(params)
 
     # get pretrained action model
-    action_model = datautils.load_action_model(env, params.gpu_num, params.action_load)
+    if params.action_load:
+        print("=====> Loading action sampler from " + params.action_load)
+        action_model = datautils.load_action_model(env, params.gpu_num, params.action_load)
+    else:
+        action_model = None
 
     # Adam optimizer.
     optimizer = tf.optimizers.Adam(learning_rate=params.learningrate)
@@ -82,7 +86,7 @@ def run_training(params):
             # if stateful: reset RNN s.t. initial_state is set to initial particles and weights
             # if non-stateful: pass the state explicity every step
             if params.stateful:
-                model.layers[-1].reset_states(state)    # RNN layer
+                pfnet_model.layers[-1].reset_states(state)    # RNN layer
 
             # run training over trajectory
             input = [observation, odometry]
@@ -91,7 +95,7 @@ def run_training(params):
             # enable auto-differentiation
             with tf.GradientTape() as tape:
                 # forward pass
-                output, state = model(model_input, training=True)
+                output, state = pfnet_model(model_input, training=True)
 
                 # compute loss
                 particle_states, particle_weights = output
@@ -99,8 +103,8 @@ def run_training(params):
                 loss_pred = loss_dict['pred']
 
             # compute gradients of the trainable variables with respect to the loss
-            gradients = tape.gradient(loss_pred, model.trainable_weights)
-            gradients = list(zip(gradients, model.trainable_weights))
+            gradients = tape.gradient(loss_pred, pfnet_model.trainable_weights)
+            gradients = list(zip(gradients, pfnet_model.trainable_weights))
 
             # run one step of gradient descent
             optimizer.apply_gradients(gradients)
@@ -112,7 +116,7 @@ def run_training(params):
 
         # Save the weights
         print("=====> saving trained model ")
-        model.save_weights(params.train_log_dir + f'/chks/checkpoint_{epoch}_{train_loss.result():03.3f}/pfnet_checkpoint')
+        pfnet_model.save_weights(params.train_log_dir + f'/chks/checkpoint_{epoch}_{train_loss.result():03.3f}/pfnet_checkpoint')
 
         if params.run_validation:
             # run validation over all validation samples in an epoch
@@ -132,14 +136,14 @@ def run_training(params):
                 # if stateful: reset RNN s.t. initial_state is set to initial particles and weights
                 # if non-stateful: pass the state explicity every step
                 if params.stateful:
-                    model.layers[-1].reset_states(state)    # RNN layer
+                    pfnet_model.layers[-1].reset_states(state)    # RNN layer
 
                 # run validation over trajectory
                 input = [observation, odometry]
                 model_input = (input, state)
 
                 # forward pass
-                output, state = model(model_input, training=False)
+                output, state = pfnet_model(model_input, training=False)
 
                 # compute loss
                 particle_states, particle_weights = output
@@ -153,7 +157,7 @@ def run_training(params):
                 tf.summary.scalar('loss', test_loss.result(), step=epoch)
 
             # Save the weights
-            model.save_weights(params.test_log_dir + f'/chks/checkpoint_{epoch}_{test_loss.result():03.3f}/pfnet_checkpoint')
+            pfnet_model.save_weights(params.test_log_dir + f'/chks/checkpoint_{epoch}_{test_loss.result():03.3f}/pfnet_checkpoint')
 
         print(f'Epoch {epoch}, train loss: {train_loss.result():03.3f}, test loss: {test_loss.result():03.3f}')
 
@@ -175,11 +179,7 @@ if __name__ == '__main__':
     params.train_log_dir = 'logs/' + current_time + '/train/'
     params.test_log_dir = 'logs/' + current_time + '/test/'
 
-    params.mode = 'headless'
-    params.agent = 'pretrained'
     params.run_validation = True
-    params.action_load = './ppo_igibson'
-    params.config_filename = os.path.join('./configs/', 'turtlebot_demo.yaml')
 
     params.output = 'training_results.log'
 

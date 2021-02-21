@@ -94,9 +94,9 @@ def display_results(params):
     display results with the parsed arguments
     """
 
-    # old_stdout = sys.stdout
-    # log_file = open(params.output,'w')
-    # sys.stdout = log_file
+    old_stdout = sys.stdout
+    log_file = open(params.output,'w')
+    sys.stdout = log_file
 
     num_test_batches = 1
     trajlen = params.trajlen
@@ -109,15 +109,19 @@ def display_results(params):
                 device_idx=params.gpu_num, max_step=params.max_step)
 
     # create pf model
-    model = pfnet.pfnet_model(params)
+    pfnet_model = pfnet.pfnet_model(params)
 
     # load model from checkpoint file
-    if params.load:
-        print("=====> Loading model from " + params.load)
-        model.load_weights(params.load)
+    if params.pfnet_load:
+        print("=====> Loading pf model from " + params.load)
+        pfnet_model.load_weights(params.load)
 
     # get pretrained action model
-    action_model = datautils.load_action_model(env, params.gpu_num, params.action_load)
+    if params.action_load:
+        print("=====> Loading action sampler from " + params.action_load)
+        action_model = datautils.load_action_model(env, params.gpu_num, params.action_load)
+    else:
+        action_model = None
 
     mse_list = []
     success_list = []
@@ -138,13 +142,13 @@ def display_results(params):
         # if stateful: reset RNN s.t. initial_state is set to initial particles and weights
         # if non-stateful: pass the state explicity every step
         if params.stateful:
-            model.layers[-1].reset_states(state)    # RNN layer
+            pfnet_model.layers[-1].reset_states(state)    # RNN layer
 
         input = [observation, odometry]
         model_input = (input, state)
 
         # forward pass
-        output, state = model(model_input, training=False)
+        output, state = pfnet_model(model_input, training=False)
 
         # compute loss
         particle_states, particle_weights = output
@@ -172,23 +176,17 @@ def display_results(params):
     # close gym env
     env.close()
 
-    # sys.stdout = old_stdout
-    # log_file.close()
+    sys.stdout = old_stdout
+    log_file.close()
     print('testing finished')
 
 
 if __name__ == '__main__':
     params = arguments.parse_args()
 
-    params.batch_size = 1
-    params.max_step = 100
-    params.mode = 'headless'
-    params.agent = 'pretrained'
     params.out_folder = './output/'
-    params.action_load = './ppo_igibson'
-    params.output = 'display_results.log'
-    params.config_filename = os.path.join('./configs/', 'turtlebot_demo.yaml')
-
     Path(params.out_folder).mkdir(parents=True, exist_ok=True)
+
+    params.output = 'display_results.log'
 
     display_results(params)

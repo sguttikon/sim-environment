@@ -65,6 +65,7 @@ def parse_args():
 
     #HACK hardcode fix padding for map
     params.global_map_size = (4000, 4000, 1)
+    params.window_scaler = 8.0
 
     # filter out info and warning messages
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'

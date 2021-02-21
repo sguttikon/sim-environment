@@ -105,7 +105,7 @@ class PFCell(keras.layers.AbstractRNNCell):
         batch_size, num_particles = particle_states.shape.as_list()[:2]
 
         # transform global maps to local maps
-        local_maps = self.transform_maps(global_map, particle_states, (28, 28))
+        local_maps = self.transform_maps(global_map, particle_states, (28, 28), self.params.window_scaler)
 
         # rescale from [0, 2] to [-1, 1]    -> optional
         local_maps = -(local_maps - 1)
@@ -225,12 +225,13 @@ class PFCell(keras.layers.AbstractRNNCell):
 
         return tf.stack([part_x + delta_x , part_y + delta_y, part_th + delta_th], axis=-1)   # (bs, k, 3)
 
-    def transform_maps(self, global_map, particle_states, local_map_size):
+    def transform_maps(self, global_map, particle_states, local_map_size, window_scaler=None):
         """
         Implements global to local map transformation
         :param global_map: global map input (batch, None, None, ch)
         :param particle_states: particle states that define local view for transformation (batch, k, 3)
         :param local_map_size: size of output local maps (height, width)
+        :param window_scaler: global map will be down-scaled by some int factor
         :return (batch, k, local_map_size[0], local_map_size[1], ch): each local map shows different transformation
             of global map corresponding to particle state
         """
@@ -248,8 +249,6 @@ class PFCell(keras.layers.AbstractRNNCell):
         width_inverse = 1.0 / global_width
         zero = tf.constant(0, dtype=tf.float32, shape=(total_samples, ))
         one = tf.constant(1, dtype=tf.float32, shape=(total_samples, ))
-
-        window_scaler = 8.0 # global map will be down-scaled by some factor
 
         # normalize orientations and precompute cos and sin functions
         theta = -flat_states[:, 2] - 0.5 * np.pi
@@ -270,8 +269,13 @@ class PFCell(keras.layers.AbstractRNNCell):
         rotm = tf.reshape(rotm, [total_samples, 3, 3])
 
         # 3: scale down the map
-        scale_x = tf.fill((total_samples, ), float(local_map_size[1] * window_scaler) * width_inverse)
-        scale_y = tf.fill((total_samples, ), float(local_map_size[0] * window_scaler) * height_inverse)
+        if window_scaler is not None:
+            scale_x = tf.fill((total_samples, ), float(local_map_size[1] * window_scaler) * width_inverse)
+            scale_y = tf.fill((total_samples, ), float(local_map_size[0] * window_scaler) * height_inverse)
+        else:
+            # identity
+            scale_x = one
+            scale_y = one
 
         scalem = tf.stack((scale_x, zero, zero, zero, scale_y, zero, zero, zero, one), axis=1)
         scalem = tf.reshape(scalem, [total_samples, 3, 3])
