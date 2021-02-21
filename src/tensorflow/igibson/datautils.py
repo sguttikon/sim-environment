@@ -198,11 +198,11 @@ def gather_episode_stats(env, params):
 
     episode_data = {}
     episode_data['odometry'] = np.stack(odometry)  # (trajlen, 3)
+    episode_data['init_particles'] = init_particles   # (num_particles, 3)
     episode_data['true_states'] = np.stack(true_poses)  # (trajlen, 3)
-    episode_data['init_particles'] = np.stack(init_particles)   # (num_particles, 3)
     episode_data['global_map'] = process_floor_map(global_map) # (height, width, 1)
     episode_data['observation'] = raw_images_to_array(observation) # (trajlen, height, width, 3)
-    episode_data['init_particles_weights'] = np.stack(init_particles_weights)   # (num_particles,)
+    episode_data['init_particles_weights'] = init_particles_weights   # (num_particles,)
 
     return episode_data
 

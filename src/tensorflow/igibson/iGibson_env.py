@@ -406,12 +406,12 @@ class iGibsonEnv(BaseEnv):
     def get_random_particles(self, num_particles, robot_pose=None, particles_cov=None):
         """
         Sample random particles based on the scene
-        :param robot_pose: ndarray indicating the robot pose
+        :param robot_pose: ndarray indicating the robot pose (3,)
             if None, random particle poses are sampled using unifrom distribution
             otherwise, sampled using gaussian distribution around the robot_pose
         :param particles_cov: for tracking Gaussian covariance matrix (3, 3)
         :param num_particles: integer indicating the number of random particles
-        :return ndarray: random particle poses
+        :return ndarray: random particle poses  (num_particles, 3)
         """
 
         particles = []
@@ -426,7 +426,13 @@ class iGibsonEnv(BaseEnv):
                 sample_i = sample_i + 1
         else:
             # gaussian distribution
-            raise ValueError('#TODO')
+            assert list(robot_pose.shape) == [3]
 
-        particles = np.array(particles)
+            # sample offset from the Gaussian
+            center = np.random.multivariate_normal(mean=robot_pose, cov=particles_cov)
+
+            # sample particles from the Gaussian, centered around the offset
+            particles.append(np.random.multivariate_normal(mean=center, cov=particles_cov, size=num_particles))
+
+        particles = np.array(particles).squeeze(axis=0) # [num_particles, 3]
         return particles

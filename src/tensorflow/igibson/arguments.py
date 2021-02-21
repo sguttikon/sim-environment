@@ -23,7 +23,7 @@ def parse_args():
     # input configuration
     argparser.add_argument('--map_pixel_in_meters', type=float, default=0.1, help='The width (and height) of a pixel of the map in meters. Defaults to 0.1 for iGibson environment.')
 
-    argparser.add_argument('--init_particles_distr', type=str, default='uniform', help='Distribution of initial particles. Possible values: gaussian / uniform.')
+    argparser.add_argument('--init_particles_distr', type=str, default='gaussian', help='Distribution of initial particles. Possible values: gaussian / uniform.')
     argparser.add_argument('--init_particles_std', nargs='*', default=["0.3", "0.523599"], help='Standard deviations for generated initial particles for tracking distribution. Values: translation std (meters), rotation std (radians)')
     argparser.add_argument('--trajlen', type=int, default=24, help='Length of trajectories.')
 
@@ -49,9 +49,10 @@ def parse_args():
     params.transition_std = np.array(params.transition_std, np.float32)
     params.init_particles_std = np.array(params.init_particles_std, np.float32)
 
+    assert params.init_particles_distr in ['gaussian', 'uniform']
+
     # build initial covariance matrix of particles, in pixels and radians
     particle_std = params.init_particles_std.copy()
-    particle_std[0] = particle_std[0] / params.map_pixel_in_meters  # convert meters to pixels
     particle_std2 = np.square(particle_std)  # variance
     params.init_particles_cov = np.diag(particle_std2[(0, 0, 1),])
 

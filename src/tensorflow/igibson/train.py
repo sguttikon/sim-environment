@@ -170,8 +170,9 @@ if __name__ == '__main__':
     params.train_log_dir = 'logs/' + current_time + '/train/'
     params.test_log_dir = 'logs/' + current_time + '/test/'
 
-    params.run_validation = True
     params.mode = 'headless'
+    params.manual_action = False
+    params.run_validation = True
     params.config_filename = os.path.join('./configs/', 'turtlebot_demo.yaml')
 
     params.output = 'training_results.log'
