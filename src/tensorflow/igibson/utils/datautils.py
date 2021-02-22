@@ -209,12 +209,8 @@ def gather_episode_stats(env, params, action_model):
     odometry.append(odom)
 
     # sample random particles and corresponding weights
-    if particles_distr == 'uniform':
-        init_particles = env.get_random_particles(num_particles)
-    elif particles_distr == 'gaussian':
-        init_particles = env.get_random_particles(num_particles, true_poses[0], particles_cov)
     init_particles = env.get_random_particles(num_particles, particles_distr, true_poses[0], particles_cov).squeeze(axis=0)
-    init_particles_weights = np.full((num_particles, ), (1./num_particles))
+    init_particle_weights = np.full((num_particles, ), (1./num_particles))
 
     episode_data = {}
     episode_data['global_map'] = global_map # (height, width, 1)
@@ -222,7 +218,7 @@ def gather_episode_stats(env, params, action_model):
     episode_data['init_particles'] = init_particles   # (num_particles, 3)
     episode_data['true_states'] = np.stack(true_poses)  # (trajlen, 3)
     episode_data['observation'] = np.stack(observation) # (trajlen, height, width, 3)
-    episode_data['init_particles_weights'] = init_particles_weights   # (num_particles,)
+    episode_data['init_particle_weights'] = init_particle_weights   # (num_particles,)
 
     return episode_data
 
@@ -245,7 +241,7 @@ def get_batch_data(env, params, action_model):
     observation = []
     true_states = []
     init_particles = []
-    init_particles_weights = []
+    init_particle_weights = []
 
     for _ in range(batch_size):
         episode_data = gather_episode_stats(env, params, action_model)
@@ -255,7 +251,7 @@ def get_batch_data(env, params, action_model):
         true_states.append(episode_data['true_states'])
         observation.append(episode_data['observation'])
         init_particles.append(episode_data['init_particles'])
-        init_particles_weights.append(episode_data['init_particles_weights'])
+        init_particle_weights.append(episode_data['init_particle_weights'])
 
     batch_data = {}
     batch_data['odometry'] = np.stack(odometry)
@@ -263,14 +259,14 @@ def get_batch_data(env, params, action_model):
     batch_data['true_states'] = np.stack(true_states)
     batch_data['observation'] = np.stack(observation)
     batch_data['init_particles'] = np.stack(init_particles)
-    batch_data['init_particles_weights'] = np.stack(init_particles_weights)
+    batch_data['init_particle_weights'] = np.stack(init_particle_weights)
 
     # sanity check
     assert list(batch_data['odometry'].shape) == [batch_size, trajlen, 3]
     assert list(batch_data['true_states'].shape) == [batch_size, trajlen, 3]
     assert list(batch_data['observation'].shape) == [batch_size, trajlen, 56, 56, 3]
     assert list(batch_data['init_particles'].shape) == [batch_size, num_particles, 3]
-    assert list(batch_data['init_particles_weights'].shape) == [batch_size, num_particles]
+    assert list(batch_data['init_particle_weights'].shape) == [batch_size, num_particles]
     assert list(batch_data['global_map'].shape) == [batch_size, map_size[0], map_size[1], map_size[2]]
 
     return batch_data
@@ -286,7 +282,7 @@ def serialize_tf_record(episode_data):
     global_map = episode_data['global_map']
     observation = episode_data['observation']
     init_particles = episode_data['init_particles']
-    init_particles_weights = episode_data['init_particles_weights']
+    init_particle_weights = episode_data['init_particle_weights']
 
     record = {
         'state': tf.train.Feature(float_list=tf.train.FloatList(value=states.flatten())),
@@ -299,8 +295,8 @@ def serialize_tf_record(episode_data):
         'observation_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=observation.shape)),
         # 'init_particles': tf.train.Feature(float_list=tf.train.FloatList(value=init_particles.flatten())),
         # 'init_particles_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=init_particles.shape)),
-        # 'init_particles_weights': tf.train.Feature(float_list=tf.train.FloatList(value=init_particles_weights.flatten())),
-        # 'init_particles_weights_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=init_particles_weights.shape)),
+        # 'init_particle_weights': tf.train.Feature(float_list=tf.train.FloatList(value=init_particle_weights.flatten())),
+        # 'init_particle_weights_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=init_particle_weights.shape)),
     }
 
     return tf.train.Example(features=tf.train.Features(feature=record)).SerializeToString()
@@ -320,10 +316,10 @@ def deserialize_tf_record(raw_record):
         'global_map_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
         'observation': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
         'observation_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
-        'init_particles': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
-        'init_particles_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
-        'init_particles_weights': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
-        'init_particles_weights_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
+        # 'init_particles': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
+        # 'init_particles_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
+        # 'init_particle_weights': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
+        # 'init_particle_weights_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
     }
 
     features_tensor = tf.io.parse_single_example(raw_record, tfrecord_format)
