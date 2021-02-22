@@ -6,11 +6,12 @@ def set_path(path: str):
         sys.path.index(path)
     except ValueError:
         sys.path.insert(0, path)
+from utils import datautils, arguments, pfnet_loss
+from utils.iGibson_env import iGibsonEnv
 
 # set programatically the path to 'pfnet' directory (alternately can also set PYTHONPATH)
 set_path('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src/tensorflow/pfnet')
 # set_path('/home/guttikon/awesome_robotics/sim-environment/src/tensorflow/pfnet')
-
 
 import os
 import pfnet
@@ -18,8 +19,6 @@ from tqdm import tqdm
 import tensorflow as tf
 from tensorflow import keras
 from datetime import datetime
-from iGibson_env import iGibsonEnv
-import datautils, arguments, pfnet_loss
 
 def train_dataset_size():
     return 800
@@ -121,7 +120,7 @@ def run_training(params):
         if params.run_validation:
             # run validation over all validation samples in an epoch
             for idx in tqdm(range(num_valid_batches)):
-                batch_sample = datautils.get_batch_data(env, params)
+                batch_sample = datautils.get_batch_data(env, params, action_model)
 
                 odometry = tf.convert_to_tensor(batch_sample['odometry'], dtype=tf.float32)
                 global_map = tf.convert_to_tensor(batch_sample['global_map'], dtype=tf.float32)

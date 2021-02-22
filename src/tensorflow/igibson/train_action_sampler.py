@@ -2,7 +2,7 @@
 
 import os
 from stable_baselines3 import PPO
-from iGibson_env import iGibsonEnv
+from utils.iGibson_env import iGibsonEnv
 from stable_baselines3.ppo import MlpPolicy
 
 def train_action_sampler(device, timesteps, max_step):

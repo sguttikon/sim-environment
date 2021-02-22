@@ -7,6 +7,7 @@ def set_path(path: str):
     except ValueError:
         sys.path.insert(0, path)
 from utils import render, datautils, arguments, pfnet_loss
+from utils.iGibson_env import iGibsonEnv
 
 # set programatically the path to 'pfnet' directory (alternately can also set PYTHONPATH)
 set_path('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src/tensorflow/pfnet')
@@ -19,7 +20,6 @@ from tqdm import tqdm
 import tensorflow as tf
 from pathlib import Path
 import matplotlib.pyplot as plt
-from iGibson_env import iGibsonEnv
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 
 def store_results(idx, global_map, particle_states, particle_weights, true_states, params):

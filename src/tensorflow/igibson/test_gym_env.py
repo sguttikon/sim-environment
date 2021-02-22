@@ -3,7 +3,7 @@
 import os
 import numpy as np
 import pybullet as p
-from iGibson_env import iGibsonEnv
+from utils.iGibson_env import iGibsonEnv
 
 np.set_printoptions(precision=5, suppress=True)
 
@@ -18,10 +18,12 @@ if __name__ == '__main__':
     for episode in range(1):
         print(f'Episode: {episode}')
         state = env.reset()
-        print(f'robot pose: {state["pose"]}')
+        robot_state = env.get_robot_state()
+        print(f'robot pose: {robot_state["pose"]}')
         for _ in range(50):  # 5 seconds
             env.render()
             action = env.action_space.sample()
-            state, reward, done, _ = env.step(action)
-            print(f'robot pose: {state["pose"]}, reward: {reward}, done: {done}')
+            obs, reward, done, _ = env.step(action)
+            robot_state = env.get_robot_state()
+            print(f'robot pose: {robot_state["pose"]}, reward: {reward}, done: {done}')
     env.close()

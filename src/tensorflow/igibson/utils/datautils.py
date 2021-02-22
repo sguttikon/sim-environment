@@ -3,6 +3,7 @@
 import cv2
 import numpy as np
 import pybullet as p
+import tensorflow as tf
 from stable_baselines3 import PPO
 from stable_baselines3.ppo import MlpPolicy
 
@@ -272,6 +273,46 @@ def get_batch_data(env, params, action_model):
 
     return batch_data
 
-if __name__ == '__main__':
-    print(normalize(3*np.pi))
-    print(normalize(-3*np.pi))
+def serialize_tf_record(episode_data):
+    states = episode_data['true_states']
+    odometry = episode_data['odometry']
+    global_map = episode_data['global_map']
+    observation = episode_data['observation']
+    init_particles = episode_data['init_particles']
+    init_particles_weights = episode_data['init_particles_weights']
+
+    record = {
+        'state': tf.train.Feature(float_list=tf.train.FloatList(value=states.flatten())),
+        'state_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=states.shape)),
+        'odometry': tf.train.Feature(float_list=tf.train.FloatList(value=odometry.flatten())),
+        'odometry_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=odometry.shape)),
+        'global_map': tf.train.Feature(float_list=tf.train.FloatList(value=global_map.flatten())),
+        'global_map_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=global_map.shape)),
+        'observation': tf.train.Feature(float_list=tf.train.FloatList(value=observation.flatten())),
+        'observation_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=observation.shape)),
+        'init_particles': tf.train.Feature(float_list=tf.train.FloatList(value=init_particles.flatten())),
+        'init_particles_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=init_particles.shape)),
+        'init_particles_weights': tf.train.Feature(float_list=tf.train.FloatList(value=init_particles_weights.flatten())),
+        'init_particles_weights_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=init_particles_weights.shape)),
+    }
+
+    return tf.train.Example(features=tf.train.Features(feature=record)).SerializeToString()
+
+def deserialize_tf_record(record):
+    tfrecord_format = {
+        'state': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
+        'state_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
+        'odometry': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
+        'odometry_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
+        'global_map': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
+        'global_map_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
+        'observation': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
+        'observation_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
+        'init_particles': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
+        'init_particles_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
+        'init_particles_weights': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
+        'init_particles_weights_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
+    }
+
+    features_tensor = tf.io.parse_single_example(record, tfrecord_format)
+    return features_tensor
