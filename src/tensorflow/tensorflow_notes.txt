@@ -122,3 +122,6 @@ run_validation = True
 nohup python train.py --batch_size 4 --learningrate 0.0001 --epochs 100 --num_particles 30 --trajlen 24 --gpu_num 0 --agent 'random' > training_results0.out &
 
 python display_results.py --pfnet_load ../pfnet/bckp/logs/20210212-192446/test/chks/checkpoint_90_0.289/pfnet_checkpoint --batch_size 1 --epochs 1 --num_particles 500 --trajlen 100 --resample 'true' --alpha_resample_ratio 1.0 --transition_std '0.04' '0.0872665' --init_particles_distr 'uniform' --gpu_num 0 --seed 100
+
+
+python eval.py --pfnet_load ../pfnet/bckp/logs/20210212-192446/test/chks/checkpoint_90_0.289/pfnet_checkpoint --testfiles './data/test/test.tfrecord' --batch_size 1 --num_particles 500 --trajlen 24 --seed 98

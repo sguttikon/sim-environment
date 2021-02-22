@@ -86,6 +86,7 @@ class iGibsonEnv(BaseEnv):
 
             plt.draw()
             plt.pause(0.00000000001)
+        self.floor_num = 0
 
     def load(self):
         """
@@ -490,39 +491,49 @@ class iGibsonEnv(BaseEnv):
 
         return len(collisions) == 0
 
-    def get_random_particles(self, num_particles, robot_pose=None, particles_cov=None):
+    def get_random_particles(self, num_particles, particles_distr, robot_pose, particles_cov):
         """
         Sample random particles based on the scene
-        :param robot_pose: ndarray indicating the robot pose (3,)
+        :param particles_distr: string type of distribution, possible value: [gaussian, uniform]
+        :param robot_pose: ndarray indicating the robot pose ([batch_size], 3)
             if None, random particle poses are sampled using unifrom distribution
             otherwise, sampled using gaussian distribution around the robot_pose
         :param particles_cov: for tracking Gaussian covariance matrix (3, 3)
-        :param num_particles: integer indicating the number of random particles
-        :return ndarray: random particle poses  (num_particles, 3)
+        :param num_particles: integer indicating the number of random particles per batch
+        :return ndarray: random particle poses  (batch_size, num_particles, 3)
         """
 
-        particles = []
-        if robot_pose is None:
-            # uniform distribution
-            sample_i = 0
-            while sample_i < num_particles:
-                pos, orn = self.sample_random_pose()
-                orn = p.getEulerFromQuaternion(orn) # [r, p, y]
-                particles.append([pos[0], pos[1], orn[2]])  # [x, y, theta]
-
-                sample_i = sample_i + 1
-            particles = np.array(particles) # [num_particles, 3]
+        assert robot_pose.ndim <= 2
+        if robot_pose.ndim == 2:
+            batches = robot_pose.shape[0]
         else:
-            # gaussian distribution
-            assert list(robot_pose.shape) == [3]
+            batches = 1
 
-            # sample offset from the Gaussian
-            center = np.random.multivariate_normal(mean=robot_pose, cov=particles_cov)
+        particles = []
+        if particles_distr == 'uniform':
+            # iterate per batch_size
+            for b_idx in range(batches):
+                sample_i = 0
+                b_particles = []
+                while sample_i < num_particles:
+                    pos, orn = self.sample_random_pose()
+                    orn = p.getEulerFromQuaternion(orn) # [r, p, y]
+                    b_particles.append([pos[0], pos[1], orn[2]])  # [x, y, theta]
 
-            # sample particles from the Gaussian, centered around the offset
-            particles.append(np.random.multivariate_normal(mean=center, cov=particles_cov, size=num_particles))
+                    sample_i = sample_i + 1
+                particles.append(b_particles)
+        elif particles_distr == 'gaussian':
+            # iterate per batch_size
+            for b_idx in range(batches):
+                # sample offset from the Gaussian
+                center = np.random.multivariate_normal(mean=robot_pose[b_idx], cov=particles_cov)
 
-            particles = np.array(particles).squeeze(axis=0) # [num_particles, 3]
+                # sample particles from the Gaussian, centered around the offset
+                particles.append(np.random.multivariate_normal(mean=center, cov=particles_cov, size=num_particles))
+        else:
+            raise ValueError
+
+        particles = np.stack(particles) # [batch_size, num_particles, 3]
         return particles
 
     def filter_collision_links(self, collision_links):

@@ -106,6 +106,7 @@ def display_results(params):
     env = iGibsonEnv(config_file=params.config_filename, mode=params.mode,
                 action_timestep=1 / 10.0, physics_timestep=1 / 240.0,
                 device_idx=params.gpu_num, max_step=params.max_step)
+    env.reset()
 
     # create pf model
     pfnet_model = pfnet.pfnet_model(params)

@@ -157,6 +157,7 @@ def load_action_model(env, device, path):
 def gather_episode_stats(env, params, action_model):
     """
     Run the gym environment and collect the required stats
+    :param env: igibson env instance
     :param params: parsed parameters
     :param action_model: pretrained action sampler model
     :return dict: episode stats data containing:
@@ -212,6 +213,7 @@ def gather_episode_stats(env, params, action_model):
         init_particles = env.get_random_particles(num_particles)
     elif particles_distr == 'gaussian':
         init_particles = env.get_random_particles(num_particles, true_poses[0], particles_cov)
+    init_particles = env.get_random_particles(num_particles, particles_distr, true_poses[0], particles_cov).squeeze(axis=0)
     init_particles_weights = np.full((num_particles, ), (1./num_particles))
 
     episode_data = {}
@@ -274,6 +276,11 @@ def get_batch_data(env, params, action_model):
     return batch_data
 
 def serialize_tf_record(episode_data):
+    """
+    Serialize episode data (state, odometry, observation, global map) as tf record
+    :param dict episode_data: episode data
+    :return tf.train.Example: serialized tf record
+    """
     states = episode_data['true_states']
     odometry = episode_data['odometry']
     global_map = episode_data['global_map']
@@ -298,7 +305,12 @@ def serialize_tf_record(episode_data):
 
     return tf.train.Example(features=tf.train.Features(feature=record)).SerializeToString()
 
-def deserialize_tf_record(record):
+def deserialize_tf_record(raw_record):
+    """
+    Serialize episode tf record (state, odometry, observation, global map)
+    :param tf.train.Example raw_record: serialized tf record
+    :return tf.io.parse_single_example: de-serialized tf record
+    """
     tfrecord_format = {
         'state': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
         'state_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
@@ -314,5 +326,47 @@ def deserialize_tf_record(record):
         'init_particles_weights_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
     }
 
-    features_tensor = tf.io.parse_single_example(record, tfrecord_format)
+    features_tensor = tf.io.parse_single_example(raw_record, tfrecord_format)
     return features_tensor
+
+def get_dataflow(filenames, batch_size, s_buffer_size=100, is_training=False):
+    """
+    Custom dataset for TF record
+    """
+    ds = tf.data.TFRecordDataset(filenames)
+    if is_training:
+        ds = ds.shuffle(s_buffer_size, reshuffle_each_iteration=True)
+    ds = ds.map(deserialize_tf_record, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    ds = ds.batch(batch_size, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE)
+
+    return ds
+
+def transform_raw_record(env, parsed_record, params):
+    """
+    process de-serialized tfrecords data
+    :param env: igibson env instance
+    :param parsed_record: de-serialized tfrecord data
+    :param params: parsed parameters
+    :return dict: processed data containing: true_states, odometries, observations, global map, initial particles
+    """
+    trans_record = {}
+
+    trajlen = params.trajlen
+    batch_size = params.batch_size
+    num_particles = params.num_particles
+    particles_cov = params.init_particles_cov
+    particles_distr = params.init_particles_distr
+
+    trans_record['observation'] = parsed_record['observation'].reshape(
+                [batch_size] + list(parsed_record['observation_shape'][0]))[:, :trajlen]
+    trans_record['odometry'] = parsed_record['odometry'].reshape(
+                [batch_size] + list(parsed_record['odometry_shape'][0]))[:, :trajlen]
+    trans_record['true_states'] = parsed_record['state'].reshape(
+                [batch_size] + list(parsed_record['state_shape'][0]))[:, :trajlen]
+    trans_record['global_map'] = parsed_record['global_map'].reshape(
+                [batch_size] + list(parsed_record['global_map_shape'][0]))
+
+    # sample random particles and corresponding weights
+    trans_record['init_particles'] = env.get_random_particles(num_particles, particles_distr, trans_record['true_states'][:, 0, :], particles_cov)
+
+    return trans_record

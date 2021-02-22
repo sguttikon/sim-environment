@@ -30,5 +30,6 @@ if __name__ == '__main__':
     env = iGibsonEnv(config_file=params.config_filename, mode=params.mode,
                 action_timestep=1 / 10.0, physics_timestep=1 / 240.0,
                 device_idx=params.gpu_num, max_step=params.max_step)
+    env.reset()
 
     collect_data(env, params, None, './test.tfrecord', num_records=50)
