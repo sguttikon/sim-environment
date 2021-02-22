@@ -290,10 +290,10 @@ def serialize_tf_record(episode_data):
         'global_map_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=global_map.shape)),
         'observation': tf.train.Feature(float_list=tf.train.FloatList(value=observation.flatten())),
         'observation_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=observation.shape)),
-        'init_particles': tf.train.Feature(float_list=tf.train.FloatList(value=init_particles.flatten())),
-        'init_particles_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=init_particles.shape)),
-        'init_particles_weights': tf.train.Feature(float_list=tf.train.FloatList(value=init_particles_weights.flatten())),
-        'init_particles_weights_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=init_particles_weights.shape)),
+        # 'init_particles': tf.train.Feature(float_list=tf.train.FloatList(value=init_particles.flatten())),
+        # 'init_particles_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=init_particles.shape)),
+        # 'init_particles_weights': tf.train.Feature(float_list=tf.train.FloatList(value=init_particles_weights.flatten())),
+        # 'init_particles_weights_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=init_particles_weights.shape)),
     }
 
     return tf.train.Example(features=tf.train.Features(feature=record)).SerializeToString()
