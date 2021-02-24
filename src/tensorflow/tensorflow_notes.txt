@@ -128,3 +128,13 @@ Feb 22nd 2020
 python eval.py --pfnet_load ../pfnet/bckp/logs/20210212-192446/test/chks/checkpoint_90_0.289/pfnet_checkpoint --testfiles './data/test/test.tfrecord' --batch_size 1 --epochs 1 --num_particles 500 --trajlen 24 --seed 98
 
 nohup python display_results.py --pfnet_load './logs/20210212-192446/test/chks/checkpoint_90_0.289/pfnet_checkpoint' --testfiles './data/test/test.tfrecord' --batch_size 1 --epochs 1 --seed 98 --num_particles 3000 --trajlen 100 --resample 'true' --alpha_resample_ratio 1.0 --transition_std '0.04' '0.0872665' --init_particles_distr 'uniform' --gpu_num 1 > display_results0.out &
+
+nohup python display_results.py --pfnet_load './logs/20210222-001755/test/chks/checkpoint_33_0.293/pfnet_checkpoint' --testfiles './data/test/test.tfrecord' --batch_size 1 --epochs 1 --seed 98 --num_particles 1000 --trajlen 100 --resample 'true' --alpha_resample_ratio 1.0 --transition_std '0.04' '0.0872665' --init_particles_distr 'uniform' --gpu_num 1 > display_results0.out &
+
+
+=======================================
+TODO:
+1. check for bug in visualization/code
+2. overfit -> train and eval on same data -> manual data
+3. trained agent point navigation task
+=======================================

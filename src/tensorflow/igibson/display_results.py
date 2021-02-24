@@ -35,6 +35,8 @@ def store_results(idx, global_map, particle_states, particle_weights, true_state
     est_states = tf.math.reduce_sum(tf.math.multiply(
                         particle_states[:, :, :, :], lin_weights[:, :, :, None]
                     ), axis=2)
+    # # normalize between [-pi, +pi]
+    # est_states[:, :, 2] = tf.math.floormod(est_states[:, :, 2] + np.pi, 2*np.pi) - np.pi
 
     # plot map
     floor_map = global_map[0, :, :, 0].numpy()    # [H, W]
@@ -80,6 +82,8 @@ def store_results(idx, global_map, particle_states, particle_weights, true_state
         img = np.array(canvas.renderer._renderer)
         img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         images.append(img)
+
+    print(f'{idx} True Pose: {true_state[0]}, Estimated Pose: {est_state[0]}')
 
     size = (images[0].shape[0], images[0].shape[1])
     out = cv2.VideoWriter(params.out_folder + f'result_{idx}.avi', cv2.VideoWriter_fourcc(*'XVID'), 30, size)

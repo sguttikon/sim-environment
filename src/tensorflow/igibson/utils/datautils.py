@@ -154,18 +154,20 @@ def load_action_model(env, device, path):
 
     return model
 
-def gather_episode_stats(env, params, action_model):
+def gather_episode_stats(env, params, action_model, sample_particles=False):
     """
     Run the gym environment and collect the required stats
     :param env: igibson env instance
     :param params: parsed parameters
     :param action_model: pretrained action sampler model
+    :param sample_particles: whether or not to sample particles
     :return dict: episode stats data containing:
         odometry, true poses, observation, particles, particles weights, floor map
     """
 
     agent = params.agent
     trajlen = params.trajlen
+    map_size = params.global_map_size
     num_particles = params.num_particles
     particles_cov = params.init_particles_cov
     particles_distr = params.init_particles_distr
@@ -178,6 +180,7 @@ def gather_episode_stats(env, params, action_model):
     observation.append(obs)
 
     global_map = env.get_floor_map()    # already processed
+    assert list(global_map.shape) == [map_size[0], map_size[1], map_size[2]]
 
     old_pose = env.get_robot_state()['pose']
     true_poses.append(old_pose)
@@ -193,14 +196,17 @@ def gather_episode_stats(env, params, action_model):
 
         # take action and get new observation
         obs, reward, done, _ = env.step(action)
+        assert list(obs.shape) == [56, 56, 3]
         observation.append(obs)
 
         # get new robot state after taking action
         new_pose = env.get_robot_state()['pose']
+        assert list(new_pose.shape) == [3]
         true_poses.append(new_pose)
 
         # calculate actual odometry b/w old pose and new pose
         odom = calc_odometry(old_pose, new_pose)
+        assert list(odom.shape) == [3]
         odometry.append(odom)
         old_pose = new_pose
 
@@ -208,16 +214,22 @@ def gather_episode_stats(env, params, action_model):
     odom = calc_odometry(old_pose, new_pose)
     odometry.append(odom)
 
-    # sample random particles and corresponding weights
-    init_particles = env.get_random_particles(num_particles, particles_distr, true_poses[0], particles_cov).squeeze(axis=0)
-    init_particle_weights = np.full((num_particles, ), (1./num_particles))
+    if sample_particles:
+        # sample random particles and corresponding weights
+        init_particles = env.get_random_particles(num_particles, particles_distr, true_poses[0], particles_cov).squeeze(axis=0)
+        init_particle_weights = np.full((num_particles, ), (1./num_particles))
+        assert list(init_particles.shape) == [num_particles, 3]
+        assert list(init_particle_weights.shape) == [num_particles]
+    else:
+        init_particles = None
+        init_particle_weights = None
 
     episode_data = {}
     episode_data['global_map'] = global_map # (height, width, 1)
     episode_data['odometry'] = np.stack(odometry)  # (trajlen, 3)
-    episode_data['init_particles'] = init_particles   # (num_particles, 3)
     episode_data['true_states'] = np.stack(true_poses)  # (trajlen, 3)
     episode_data['observation'] = np.stack(observation) # (trajlen, height, width, 3)
+    episode_data['init_particles'] = init_particles   # (num_particles, 3)
     episode_data['init_particle_weights'] = init_particle_weights   # (num_particles,)
 
     return episode_data
@@ -244,7 +256,7 @@ def get_batch_data(env, params, action_model):
     init_particle_weights = []
 
     for _ in range(batch_size):
-        episode_data = gather_episode_stats(env, params, action_model)
+        episode_data = gather_episode_stats(env, params, action_model, True)
 
         odometry.append(episode_data['odometry'])
         global_map.append(episode_data['global_map'])
@@ -281,8 +293,8 @@ def serialize_tf_record(episode_data):
     odometry = episode_data['odometry']
     global_map = episode_data['global_map']
     observation = episode_data['observation']
-    init_particles = episode_data['init_particles']
-    init_particle_weights = episode_data['init_particle_weights']
+    # init_particles = episode_data['init_particles']
+    # init_particle_weights = episode_data['init_particle_weights']
 
     record = {
         'state': tf.train.Feature(float_list=tf.train.FloatList(value=states.flatten())),
