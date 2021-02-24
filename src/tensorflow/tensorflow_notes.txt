@@ -138,3 +138,8 @@ TODO:
 2. overfit -> train and eval on same data -> manual data
 3. trained agent point navigation task
 =======================================
+
+
+Feb 24th 2020
+-------------
+nohup python train.py --trainfiles './data/train/*.tfrecord' --testfiles './data/valid/*.tfrecord' --batch_size 4 --learningrate 0.0001 --epochs 100 --num_particles 30 --trajlen 24 --gpu_num 0 > training_results0.out &

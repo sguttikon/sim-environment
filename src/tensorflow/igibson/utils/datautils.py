@@ -361,6 +361,7 @@ def transform_raw_record(env, parsed_record, params):
 
     trajlen = params.trajlen
     batch_size = params.batch_size
+    map_size = params.global_map_size
     num_particles = params.num_particles
     particles_cov = params.init_particles_cov
     particles_distr = params.init_particles_distr
@@ -376,5 +377,12 @@ def transform_raw_record(env, parsed_record, params):
 
     # sample random particles and corresponding weights
     trans_record['init_particles'] = env.get_random_particles(num_particles, particles_distr, trans_record['true_states'][:, 0, :], particles_cov)
+
+    # sanity check
+    assert list(trans_record['odometry'].shape) == [batch_size, trajlen, 3]
+    assert list(trans_record['true_states'].shape) == [batch_size, trajlen, 3]
+    assert list(trans_record['observation'].shape) == [batch_size, trajlen, 56, 56, 3]
+    assert list(trans_record['init_particles'].shape) == [batch_size, num_particles, 3]
+    assert list(trans_record['global_map'].shape) == [batch_size, map_size[0], map_size[1], map_size[2]]
 
     return trans_record

@@ -104,7 +104,7 @@ def run_training(params):
         model.save_weights(params.train_log_dir + f'/chks/checkpoint_{epoch}_{train_loss.result():03.3f}/pfnet_checkpoint')
 
         if params.run_validation:
-            itr = train_ds.as_numpy_iterator()
+            itr = test_ds.as_numpy_iterator()
             # run validation over all validation samples in an epoch
             for idx in tqdm(range(num_valid_batches)):
                 raw_record = next(itr)

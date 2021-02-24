@@ -8,6 +8,8 @@ def set_path(path: str):
         sys.path.insert(0, path)
 from utils import datautils, arguments, pfnet_loss
 from utils.iGibson_env import iGibsonEnv
+import numpy as np
+import glob
 
 # set programatically the path to 'pfnet' directory (alternately can also set PYTHONPATH)
 set_path('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src/tensorflow/pfnet')
@@ -47,6 +49,16 @@ def run_training(params):
                 device_idx=params.gpu_num, max_step=params.max_step)
     env.reset()
 
+    # training data
+    filenames = list(glob.glob(params.trainfiles[0]))
+    train_ds = datautils.get_dataflow(filenames, params.batch_size, is_training=True)
+    print(f'training data: {filenames}')
+
+    # validation data
+    filenames = list(glob.glob(params.testfiles[0]))
+    print(f'validation data: {filenames}')
+    test_ds = datautils.get_dataflow(filenames, params.batch_size, is_training=True)
+
     # create pf model
     pfnet_model = pfnet.pfnet_model(params)
 
@@ -67,21 +79,27 @@ def run_training(params):
     train_summary_writer = tf.summary.create_file_writer(params.train_log_dir + 'gradient_tape/')
     test_summary_writer = tf.summary.create_file_writer(params.test_log_dir + 'gradient_tape/')
 
+    print('training starting')
+
     # repeat for a fixed number of epochs
     for epoch in range(params.epochs):
+        itr = train_ds.as_numpy_iterator()
         # run training over all training samples in an epoch
         for idx in tqdm(range(num_train_batches)):
-            batch_sample = datautils.get_batch_data(env, params, action_model)
+            # batch_sample = datautils.get_batch_data(env, params, action_model)
+            parsed_record = next(itr)
+            batch_sample = datautils.transform_raw_record(env, parsed_record, params)
 
             odometry = tf.convert_to_tensor(batch_sample['odometry'], dtype=tf.float32)
             global_map = tf.convert_to_tensor(batch_sample['global_map'], dtype=tf.float32)
             observation = tf.convert_to_tensor(batch_sample['observation'], dtype=tf.float32)
             true_states = tf.convert_to_tensor(batch_sample['true_states'], dtype=tf.float32)
             init_particles = tf.convert_to_tensor(batch_sample['init_particles'], dtype=tf.float32)
-            init_particles_weights = tf.convert_to_tensor(batch_sample['init_particles_weights'], dtype=tf.float32)
+            init_particle_weights = tf.constant(np.log(1.0/float(num_particles)),
+                                        shape=(batch_size, num_particles), dtype=tf.float32)
 
             # start trajectory with initial particles and weights
-            state = [init_particles, init_particles_weights, global_map]
+            state = [init_particles, init_particle_weights, global_map]
 
             # if stateful: reset RNN s.t. initial_state is set to initial particles and weights
             # if non-stateful: pass the state explicity every step
@@ -119,19 +137,23 @@ def run_training(params):
         pfnet_model.save_weights(params.train_log_dir + f'/chks/checkpoint_{epoch}_{train_loss.result():03.3f}/pfnet_checkpoint')
 
         if params.run_validation:
+            itr = test_ds.as_numpy_iterator()
             # run validation over all validation samples in an epoch
             for idx in tqdm(range(num_valid_batches)):
-                batch_sample = datautils.get_batch_data(env, params, action_model)
+                # batch_sample = datautils.get_batch_data(env, params, action_model)
+                parsed_record = next(itr)
+                batch_sample = datautils.transform_raw_record(env, parsed_record, params)
 
                 odometry = tf.convert_to_tensor(batch_sample['odometry'], dtype=tf.float32)
                 global_map = tf.convert_to_tensor(batch_sample['global_map'], dtype=tf.float32)
                 observation = tf.convert_to_tensor(batch_sample['observation'], dtype=tf.float32)
                 true_states = tf.convert_to_tensor(batch_sample['true_states'], dtype=tf.float32)
                 init_particles = tf.convert_to_tensor(batch_sample['init_particles'], dtype=tf.float32)
-                init_particles_weights = tf.convert_to_tensor(batch_sample['init_particles_weights'], dtype=tf.float32)
+                init_particle_weights = tf.constant(np.log(1.0/float(num_particles)),
+                                            shape=(batch_size, num_particles), dtype=tf.float32)
 
                 # start trajectory with initial particles and weights
-                state = [init_particles, init_particles_weights, global_map]
+                state = [init_particles, init_particle_weights, global_map]
 
                 # if stateful: reset RNN s.t. initial_state is set to initial particles and weights
                 # if non-stateful: pass the state explicity every step
