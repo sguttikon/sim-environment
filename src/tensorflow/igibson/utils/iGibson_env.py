@@ -216,13 +216,20 @@ class iGibsonEnv(BaseEnv):
         """
         Get the current robot state
         :return dict: state of robot as a dictionary
-            containing: gt pose
+            containing: gt pose in pixel space
         """
         robot_state = OrderedDict()
+
+        # get current floor map
+        floor_map = self.get_floor_map()
 
         # robot_state = self.robots[0].calc_state()
         robot_pos = self.robots[0].get_position()   # [x, y, z]
         robot_orn = p.getEulerFromQuaternion(self.robots[0].get_orientation())  # [r, p, y]
+
+        # transform from co-ordinate space to pixel space
+        robot_pos = datautils.transform_pose(robot_pos[:2], floor_map.shape, self.trav_map_resolution)  # [x, y]
+
         robot_state['pose'] = np.array([robot_pos[0], robot_pos[1], robot_orn[2]])  # [x, y, theta]
 
         # robot_state['particles'] = self.particles
@@ -366,7 +373,7 @@ class iGibsonEnv(BaseEnv):
     def reset_robot(self):
         """
         Reset the robot initial pose (position and orientation)
-            sample random initial pos and orn, check if its valid and land on it.
+            sample random initial pos in mts and orn, check if its valid and land on it.
         """
 
         reset_success = False
@@ -399,7 +406,7 @@ class iGibsonEnv(BaseEnv):
     def sample_random_pose(self):
         """
         Sample robot pose (position and orientation)
-        :return (ndarray, ndarray): position (xyz) and orientation (xyzw)
+        :return (ndarray, ndarray): position (xyz) in mts and orientation (xyzw)
         """
         _, pos = self.scene.get_random_point(floor=self.floor_num)   # [x, y, z]
         orn = np.array([0, 0, np.random.uniform(0, np.pi * 2)]) # [r, p, y]
@@ -411,7 +418,7 @@ class iGibsonEnv(BaseEnv):
         """
         Land the robot onto the floor, given a valid position and orientation
         :param Turtlebot robot: robot instance
-        :param ndarray pos: robot position (xyz)
+        :param ndarray pos: robot position (xyz) in mts
         :param ndarray orn: robot orientation (xyzw)
         """
 
@@ -441,7 +448,7 @@ class iGibsonEnv(BaseEnv):
         """
         Test if the robot can be placed with no collision
         :param Turtlebot robot: robot instance
-        :param ndarray pos: robot position (xyz)
+        :param ndarray pos: robot position (xyz) in mts
         :param ndarray orn: robot orientation (xyzw)
         :return boolean: validity
         """
@@ -460,7 +467,7 @@ class iGibsonEnv(BaseEnv):
         """
         Reset position and orientation for the robot
         :param Turtlebot robot: robot instance
-        :param ndarray pos: robot position (xyz)
+        :param ndarray pos: robot position (xyz) in mts
         :param ndarray orn: robot orientation (xyzw)
         :param offset: z offset
         """
@@ -495,18 +502,22 @@ class iGibsonEnv(BaseEnv):
         """
         Sample random particles based on the scene
         :param particles_distr: string type of distribution, possible value: [gaussian, uniform]
-        :param robot_pose: ndarray indicating the robot pose ([batch_size], 3)
+        :param robot_pose: ndarray indicating the robot pose ([batch_size], 3) in pixel space
             if None, random particle poses are sampled using unifrom distribution
             otherwise, sampled using gaussian distribution around the robot_pose
         :param particles_cov: for tracking Gaussian covariance matrix (3, 3)
         :param num_particles: integer indicating the number of random particles per batch
-        :return ndarray: random particle poses  (batch_size, num_particles, 3)
+        :return ndarray: random particle poses  (batch_size, num_particles, 3) in pixel space
         """
 
         if robot_pose.ndim == 1:
             robot_pose = np.expand_dims(robot_pose, axis=0)
 
-        assert robot_pose.ndim == 2
+        assert list(robot_pose.shape)[1] == 3
+        assert list(particles_cov.shape) == [3, 3]
+
+        # get current floor map
+        floor_map = self.get_floor_map()
         batches = robot_pose.shape[0]
 
         particles = []
@@ -518,6 +529,9 @@ class iGibsonEnv(BaseEnv):
                 while sample_i < num_particles:
                     pos, orn = self.sample_random_pose()
                     orn = p.getEulerFromQuaternion(orn) # [r, p, y]
+
+                    # transform from co-ordinate space to pixel space
+                    pos = datautils.transform_pose(pos[:2], floor_map.shape, self.trav_map_resolution)  # [x, y]
                     b_particles.append([pos[0], pos[1], orn[2]])  # [x, y, theta]
 
                     sample_i = sample_i + 1

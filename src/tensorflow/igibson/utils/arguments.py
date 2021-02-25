@@ -61,6 +61,7 @@ def parse_args():
 
     # build initial covariance matrix of particles, in pixels and radians
     particle_std = params.init_particles_std.copy()
+    particle_std[0] = particle_std[0] / params.map_pixel_in_meters  # convert meters to pixels
     particle_std2 = np.square(particle_std)  # variance
     params.init_particles_cov = np.diag(particle_std2[(0, 0, 1),])
 

@@ -86,9 +86,9 @@ def run_training(params):
         itr = train_ds.as_numpy_iterator()
         # run training over all training samples in an epoch
         for idx in tqdm(range(num_train_batches)):
-            # batch_sample = datautils.get_batch_data(env, params, action_model)
             parsed_record = next(itr)
             batch_sample = datautils.transform_raw_record(env, parsed_record, params)
+            # batch_sample = datautils.get_batch_data(env, params, action_model)
 
             odometry = tf.convert_to_tensor(batch_sample['odometry'], dtype=tf.float32)
             global_map = tf.convert_to_tensor(batch_sample['global_map'], dtype=tf.float32)
@@ -140,9 +140,9 @@ def run_training(params):
             itr = test_ds.as_numpy_iterator()
             # run validation over all validation samples in an epoch
             for idx in tqdm(range(num_valid_batches)):
-                # batch_sample = datautils.get_batch_data(env, params, action_model)
                 parsed_record = next(itr)
                 batch_sample = datautils.transform_raw_record(env, parsed_record, params)
+                # batch_sample = datautils.get_batch_data(env, params, action_model)
 
                 odometry = tf.convert_to_tensor(batch_sample['odometry'], dtype=tf.float32)
                 global_map = tf.convert_to_tensor(batch_sample['global_map'], dtype=tf.float32)

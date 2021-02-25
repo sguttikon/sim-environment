@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import cv2
 import numpy as np
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
@@ -13,35 +14,31 @@ def draw_floor_map(floor_map, plt_ax, map_plt):
     :return matplotlib.image.AxesImage: updated plot of scene floor map
     """
 
-    height, width = floor_map.shape
-    orign_x, orign_y = 0, 0
-
-    # offset the map to display correctly w.r.t origin
-    x_max = width/2 + orign_x
-    x_min = -width/2 + orign_x
-    y_max = height/2 + orign_y
-    y_min = -height/2 + orign_y
-    extent = [x_min, x_max, y_min, y_max]
-
     if map_plt is None:
         # draw floor map
-        map_plt = plt_ax.imshow(floor_map, cmap=plt.cm.binary, origin='lower', extent=extent)
+        floor_map = cv2.flip(floor_map, 0)  # flip image
+        map_plt = plt_ax.imshow(floor_map)
     else:
         # do nothing
         pass
     return map_plt
 
-def draw_particles_pose(particles, weights, particles_plt, resolution):
+def draw_particles_pose(particles, weights, map_shape, particles_plt):
     """
     Render the particle poses on the scene floor map
     :param ndarray particles: estimates of particle pose
     :param ndarray weights: corresponding weights of particle pose estimates
+    :param tuple map_shape: [height, width, channel] of the map the co-ordinated need to be transformed
     :param matplotlib.collections.PathCollection: plot of particle position color coded according to weights
-    :param int resolution: map resolution to scale (x, y)
     :return matplotlib.collections.PathCollection: updated plot of particles
     """
 
-    pos = particles[:, 0:2] / resolution # [num, x, y]
+    pos = particles[:, 0:2] # [num, x, y]
+    height, width, channel = map_shape
+
+    # flip image changes
+    pos[:, 1] = height - pos[:, 1]
+
     color = cm.rainbow(weights)
 
     if particles_plt is None:
@@ -54,22 +51,24 @@ def draw_particles_pose(particles, weights, particles_plt, resolution):
 
     return particles_plt
 
-def draw_robot_pose(robot_pose, color, plt_ax, position_plt, heading_plt, resolution):
+def draw_robot_pose(robot_pose, color, map_shape, plt_ax, position_plt, heading_plt):
     """
     Render the robot pose on the scene floor map
     :param ndarray robot_pose: ndarray representing robot position (x, y) and heading (theta)
     :param str color: color used to render robot position and heading
+    :param tuple map_shape: [height, width, channel] of the map the co-ordinated need to be transformed
     :param matplotlib.axes.Axes plt_ax: figure sub plot instance
     :param matplotlib.patches.Wedge position_plt: plot of robot position
     :param matplotlib.lines.Line2D heading_plt: plot of robot heading
-    :param int resolution: map resolution to scale (x, y)
     :return tuple(matplotlib.patches.Wedge, matplotlib.lines.Line2D): updated position and heading plot of robot
     """
 
     x, y, heading = robot_pose
+    height, width, channel = map_shape
 
-    x = x / resolution
-    y = y / resolution
+    # flip image changes
+    y = height - y
+    heading = -heading
 
     heading_len  = robot_radius = 1.0
     xdata = [x, x + (robot_radius + heading_len) * np.cos(heading)]

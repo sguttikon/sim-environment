@@ -153,21 +153,21 @@ def load_action_model(env, device, path):
 
     return model
 
-def transform_pose(pose, map_size, map_pixel_in_meters):
+def transform_pose(position, map_shape, map_pixel_in_meters):
     """
-    Transform pose from co-ordinate space to pixel space
-    :param ndarray pose: pose [x, y, theta] in co-ordinate space
-    :param tuple map_size: [height, width, channel] of the map the co-ordinated need to be transformed
+    Transform pose from 2D co-ordinate space to pixel space
+    :param ndarray position: pose [x, y] in co-ordinate space
+    :param tuple map_shape: [height, width, channel] of the map the co-ordinated need to be transformed
     :param int map_pixel_in_meters: The width (and height) of a pixel of the map in meters
     :return ndarray: pose [x, y, theta] in pixel space of map
     """
-    x, y, theta = pose
-    height, width, channel = map_size
+    x, y = position
+    height, width, channel = map_shape
 
-    x = (x * map_pixel_in_meters) + width/2
-    y = (y * map_pixel_in_meters) + height/2
+    x = (x / map_pixel_in_meters) + width/2
+    y = (y / map_pixel_in_meters) + height/2
 
-    return np.array([x, y, theta])
+    return np.array([x, y])
 
 def gather_episode_stats(env, params, action_model, sample_particles=False):
     """
@@ -199,7 +199,6 @@ def gather_episode_stats(env, params, action_model, sample_particles=False):
     assert list(global_map.shape) == list(map_size)
 
     old_pose = env.get_robot_state()['pose']
-    old_pose = transform_pose(old_pose, map_size, map_pixel_in_meters)
     assert list(old_pose.shape) == [3]
     true_poses.append(old_pose)
 
@@ -219,7 +218,6 @@ def gather_episode_stats(env, params, action_model, sample_particles=False):
 
         # get new robot state after taking action
         new_pose = env.get_robot_state()['pose']
-        new_pose = transform_pose(new_pose, map_size, map_pixel_in_meters)
         assert list(new_pose.shape) == [3]
         true_poses.append(new_pose)
 
