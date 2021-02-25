@@ -243,12 +243,11 @@ class iGibsonEnv(BaseEnv):
         """
 
         if self.show_plot:
-            floor_map = self.get_floor_map()
+            floor_map = self.get_floor_map()  # [H, W, C]
             robot_state = self.get_robot_state()
 
             # environment map
             map_plt = self.trav_map_plt
-            floor_map = floor_map[:, :, 0]    # [H, W]
             map_plt = render.draw_floor_map(floor_map, self.plt_ax, map_plt)
             self.trav_map_plt = map_plt
 
@@ -256,7 +255,7 @@ class iGibsonEnv(BaseEnv):
             color = '#7B241C'
             robot_pose = robot_state['pose']
             position_plt, heading_plt = self.robot_gt_plts['robot_position'], self.robot_gt_plts['robot_heading']
-            position_plt, heading_plt = render.draw_robot_pose(robot_pose, color, self.plt_ax, position_plt, heading_plt, self.trav_map_resolution)
+            position_plt, heading_plt = render.draw_robot_pose(robot_pose, color, floor_map.shape, self.plt_ax, position_plt, heading_plt)
             self.robot_gt_plts['robot_position'], self.robot_gt_plts['robot_heading'] = position_plt, heading_plt
 
             # # estimated particles pose

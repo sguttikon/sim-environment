@@ -184,7 +184,6 @@ def gather_episode_stats(env, params, action_model, sample_particles=False):
     trajlen = params.trajlen
     map_size = params.global_map_size
     num_particles = params.num_particles
-    map_pixel_in_meters = params.map_pixel_in_meters
     particles_cov = params.init_particles_cov
     particles_distr = params.init_particles_distr
 
