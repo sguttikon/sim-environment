@@ -81,15 +81,14 @@ def process_floor_map(floormap):
     Decode floormap
     :param floormap: floor map image as ndarray (H, W)
     :return np.ndarray: image (H, W, 1)
+        white: empty space, black: occupied space
     """
     floormap = np.atleast_3d(decode_image(floormap))
 
     # # floor map image need to be transposed and inverted here
     # floormap = 255 - np.transpose(floormap, axes=[1, 0, 2])
 
-    # floor map image need to be inverted here
-    floormap = 255 - floormap
-
+    # floor map image is already transposed and inverted
     floormap = normalize_map(floormap.astype(np.float32))
     return floormap
 
@@ -154,6 +153,22 @@ def load_action_model(env, device, path):
 
     return model
 
+def transform_pose(pose, map_size, map_pixel_in_meters):
+    """
+    Transform pose from co-ordinate space to pixel space
+    :param ndarray pose: pose [x, y, theta] in co-ordinate space
+    :param tuple map_size: [height, width, channel] of the map the co-ordinated need to be transformed
+    :param int map_pixel_in_meters: The width (and height) of a pixel of the map in meters
+    :return ndarray: pose [x, y, theta] in pixel space of map
+    """
+    x, y, theta = pose
+    height, width, channel = map_size
+
+    x = (x * map_pixel_in_meters) + width/2
+    y = (y * map_pixel_in_meters) + height/2
+
+    return np.array([x, y, theta])
+
 def gather_episode_stats(env, params, action_model, sample_particles=False):
     """
     Run the gym environment and collect the required stats
@@ -169,6 +184,7 @@ def gather_episode_stats(env, params, action_model, sample_particles=False):
     trajlen = params.trajlen
     map_size = params.global_map_size
     num_particles = params.num_particles
+    map_pixel_in_meters = params.map_pixel_in_meters
     particles_cov = params.init_particles_cov
     particles_distr = params.init_particles_distr
 
@@ -180,9 +196,11 @@ def gather_episode_stats(env, params, action_model, sample_particles=False):
     observation.append(obs)
 
     global_map = env.get_floor_map()    # already processed
-    assert list(global_map.shape) == [map_size[0], map_size[1], map_size[2]]
+    assert list(global_map.shape) == list(map_size)
 
     old_pose = env.get_robot_state()['pose']
+    old_pose = transform_pose(old_pose, map_size, map_pixel_in_meters)
+    assert list(old_pose.shape) == [3]
     true_poses.append(old_pose)
 
     for _ in range(trajlen-1):
@@ -201,6 +219,7 @@ def gather_episode_stats(env, params, action_model, sample_particles=False):
 
         # get new robot state after taking action
         new_pose = env.get_robot_state()['pose']
+        new_pose = transform_pose(new_pose, map_size, map_pixel_in_meters)
         assert list(new_pose.shape) == [3]
         true_poses.append(new_pose)
 

@@ -21,8 +21,7 @@ def parse_args():
     argparser.add_argument('--testfiles', nargs='*', default=['./data/valid.tfrecords'], help='Data file(s) for validation or evaluation (tfrecord).')
 
     # input configuration
-    argparser.add_argument('--map_pixel_in_meters', type=float, default=1, help='The width (and height) of a pixel of the map in meters. Defaults to 1 for iGibson environment.')
-    argparser.add_argument('--trav_map_resolution', type=float, default=0.1, help='The width (and height) of a pixel of the map in meters. Defaults to 0.1 for iGibson environment.')
+    argparser.add_argument('--map_pixel_in_meters', type=float, default=0.1, help='The width (and height) of a pixel of the map in meters. Defaults to 0.1 for iGibson environment [trav_map_resolution].')
     argparser.add_argument('--agent', type=str, default='random', help='Agent used to sample actions in environment. Possible values: random / pretrained / manual.')
     argparser.add_argument('--init_particles_distr', type=str, default='gaussian', help='Distribution of initial particles. Possible values: gaussian / uniform.')
     argparser.add_argument('--init_particles_std', nargs='*', default=["0.3", "0.523599"], help='Standard deviations for generated initial particles for tracking distribution. Values: translation std (meters), rotation std (radians)')

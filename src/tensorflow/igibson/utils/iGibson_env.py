@@ -503,11 +503,11 @@ class iGibsonEnv(BaseEnv):
         :return ndarray: random particle poses  (batch_size, num_particles, 3)
         """
 
-        assert robot_pose.ndim <= 2
-        if robot_pose.ndim == 2:
-            batches = robot_pose.shape[0]
-        else:
-            batches = 1
+        if robot_pose.ndim == 1:
+            robot_pose = np.expand_dims(robot_pose, axis=0)
+
+        assert robot_pose.ndim == 2
+        batches = robot_pose.shape[0]
 
         particles = []
         if particles_distr == 'uniform':

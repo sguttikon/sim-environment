@@ -4,6 +4,8 @@ import numpy as np
 import tensorflow as tf
 
 def compute_loss(particle_states, particle_weights, true_states, map_pixel_in_meters):
+    """
+    """
 
     lin_weights = tf.nn.softmax(particle_weights, axis=-1)
 
@@ -33,7 +35,7 @@ def compute_loss(particle_states, particle_weights, true_states, map_pixel_in_me
     loss_pred = tf.math.reduce_mean(loss_combined)
 
     loss = {}
-    loss['pred'] = loss_pred
-    loss['coords'] = loss_coords
+    loss['pred'] = loss_pred      # float
+    loss['coords'] = loss_coords    # [batch_size, trajlen]
 
     return loss

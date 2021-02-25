@@ -6,3 +6,4 @@ events*
 *.pth
 *.tfrecord*
 *log*
+*out*
