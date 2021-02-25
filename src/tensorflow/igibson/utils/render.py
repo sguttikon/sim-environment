@@ -2,6 +2,7 @@
 
 import cv2
 import numpy as np
+import tensorflow as tf
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 from matplotlib.patches import Wedge
@@ -33,20 +34,20 @@ def draw_particles_pose(particles, weights, map_shape, particles_plt):
     :return matplotlib.collections.PathCollection: updated plot of particles
     """
 
-    pos = particles[:, 0:2] # [num, x, y]
+    part_x, part_y, part_th = tf.unstack(particles, axis=-1, num=3)   # (k, 3)
     height, width, channel = map_shape
 
     # flip image changes
-    pos[:, 1] = height - pos[:, 1]
+    part_y = height - part_y
 
     color = cm.rainbow(weights)
 
     if particles_plt is None:
         # render particles positions with color
-        particles_plt = plt.scatter(pos[:, 0], pos[:, 1], s=10, c=color, alpha=.4)
+        particles_plt = plt.scatter(part_x, part_y, s=10, c=color, alpha=.4)
     else:
         # update existing particles positions and color
-        particles_plt.set_offsets(pos)
+        particles_plt.set_offsets(tf.stack([part_x, part_y], axis=-1))
         particles_plt.set_color(color)
 
     return particles_plt

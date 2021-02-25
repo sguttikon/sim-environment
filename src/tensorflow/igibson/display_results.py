@@ -35,11 +35,14 @@ def store_results(idx, global_map, particle_states, particle_weights, true_state
     est_states = tf.math.reduce_sum(tf.math.multiply(
                         particle_states[:, :, :, :], lin_weights[:, :, :, None]
                     ), axis=2)
-    # # normalize between [-pi, +pi]
-    # est_states[:, :, 2] = tf.math.floormod(est_states[:, :, 2] + np.pi, 2*np.pi) - np.pi
+
+    # normalize between [-pi, +pi]
+    part_x, part_y, part_th = tf.unstack(est_states, axis=-1, num=3)   # (k, 3)
+    part_th = tf.math.floormod(part_th + np.pi, 2*np.pi) - np.pi
+    est_states = tf.stack([part_x, part_y, part_th], axis=-1)
 
     # plot map
-    floor_map = global_map[0, :, :, 0].numpy()    # [H, W]
+    floor_map = global_map[0].numpy()    # [H, W, 1]
     map_plt = render.draw_floor_map(floor_map, plt_ax, None)
 
     images = []
@@ -61,20 +64,20 @@ def store_results(idx, global_map, particle_states, particle_weights, true_state
         # plot true robot pose
         position_plt, heading_plt = gt_plt['robot_position'], gt_plt['robot_heading']
         gt_plt['robot_position'], gt_plt['robot_heading'] = render.draw_robot_pose(
-                        true_state[0], '#7B241C', plt_ax,
-                        position_plt, heading_plt, params.map_pixel_in_meters)
+                        true_state[0], '#7B241C', floor_map.shape, plt_ax,
+                        position_plt, heading_plt)
 
         # plot est robot pose
         position_plt, heading_plt = est_plt['robot_position'], est_plt['robot_heading']
         est_plt['robot_position'], est_plt['robot_heading'] = render.draw_robot_pose(
-                        est_state[0], '#515A5A', plt_ax,
-                        position_plt, heading_plt, params.map_pixel_in_meters)
+                        est_state[0], '#515A5A', floor_map.shape, plt_ax,
+                        position_plt, heading_plt)
 
         # plot est pose particles
         particles_plt = est_plt['particles']
         est_plt['particles'] = render.draw_particles_pose(
                             particle_state[0], lin_weight[0],
-                            particles_plt, params.map_pixel_in_meters)
+                            floor_map.shape, particles_plt)
 
         plt_ax.legend([gt_plt['robot_position'], est_plt['robot_position']], ["gt_pose", "est_pose"])
 
@@ -139,23 +142,16 @@ def display_results(params):
     # run over all evaluation samples in an epoch
     for idx in tqdm(range(num_test_batches)):
         parsed_record = next(itr)
-        data_sample = datautils.transform_raw_record(env, parsed_record, params)
+        batch_sample = datautils.transform_raw_record(env, parsed_record, params)
+        # batch_sample = datautils.get_batch_data(env, params, action_model)
 
-        observation = tf.convert_to_tensor(data_sample['observation'], dtype=tf.float32)
-        odometry = tf.convert_to_tensor(data_sample['odometry'], dtype=tf.float32)
-        true_states = tf.convert_to_tensor(data_sample['true_states'], dtype=tf.float32)
-        global_map = tf.convert_to_tensor(data_sample['global_map'], dtype=tf.float32)
-        init_particles = tf.convert_to_tensor(data_sample['init_particles'], dtype=tf.float32)
+        observation = tf.convert_to_tensor(batch_sample['observation'], dtype=tf.float32)
+        odometry = tf.convert_to_tensor(batch_sample['odometry'], dtype=tf.float32)
+        true_states = tf.convert_to_tensor(batch_sample['true_states'], dtype=tf.float32)
+        global_map = tf.convert_to_tensor(batch_sample['global_map'], dtype=tf.float32)
+        init_particles = tf.convert_to_tensor(batch_sample['init_particles'], dtype=tf.float32)
         init_particle_weights = tf.constant(np.log(1.0/float(num_particles)),
                                     shape=(batch_size, num_particles), dtype=tf.float32)
-
-        # batch_sample = datautils.get_batch_data(env, params, action_model)
-        # odometry = tf.convert_to_tensor(batch_sample['odometry'], dtype=tf.float32)
-        # global_map = tf.convert_to_tensor(batch_sample['global_map'], dtype=tf.float32)
-        # observation = tf.convert_to_tensor(batch_sample['observation'], dtype=tf.float32)
-        # true_states = tf.convert_to_tensor(batch_sample['true_states'], dtype=tf.float32)
-        # init_particles = tf.convert_to_tensor(batch_sample['init_particles'], dtype=tf.float32)
-        # init_particle_weights = tf.convert_to_tensor(batch_sample['init_particle_weights'], dtype=tf.float32)
 
         # start trajectory with initial particles and weights
         state = [init_particles, init_particle_weights, global_map]

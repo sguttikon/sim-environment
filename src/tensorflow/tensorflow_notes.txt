@@ -152,3 +152,9 @@ Feb 25th 2020
 -------------
 1. Verified transition model -> without observation model and resampling should produce zero loss
 2. Verified and fixed transformlocalmap model -> need to convert co-ordinate space to pixel space and global map is already inverted
+3. Verified and fixed gt_pose and random particles in pixel space
+
+train_dataset_size = 200
+valid_dataset_size = 40
+run_validation = True
+nohup python train.py --batch_size 4 --learningrate 0.0001 --epochs 100 --num_particles 30 --trajlen 24 --gpu_num 0 --agent 'random' --gpu_num 0 > training_results0.out &
