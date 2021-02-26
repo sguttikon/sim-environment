@@ -5,6 +5,11 @@ import tensorflow as tf
 
 def compute_loss(particle_states, particle_weights, true_states, map_pixel_in_meters):
     """
+    :param particle_states: particle states after observation update but before motion update (batch, trajlen, k, 3)
+    :param particle_weights: particle likelihoods in the log space (unnormalized) (batch, trajlen, k)
+    :param true_states: true state of robot (batch, trajlen, 3)
+    :param int map_pixel_in_meters: The width (and height) of a pixel of the map in meters
+    :return dict: total loss and coordinate loss
     """
 
     lin_weights = tf.nn.softmax(particle_weights, axis=-1)
