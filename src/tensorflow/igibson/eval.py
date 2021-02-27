@@ -67,13 +67,14 @@ def run_evaluation(params):
             observations = tf.convert_to_tensor(data_sample['observation'], dtype=tf.float32)
             odometry = tf.convert_to_tensor(data_sample['odometry'], dtype=tf.float32)
             true_states = tf.convert_to_tensor(data_sample['true_states'], dtype=tf.float32)
-            global_map = tf.convert_to_tensor(data_sample['global_map'], dtype=tf.float32)
+            floor_map = tf.convert_to_tensor(batch_sample['floor_map'], dtype=tf.float32)
+            obstacle_map = tf.convert_to_tensor(batch_sample['obstacle_map'], dtype=tf.float32)
             init_particles = tf.convert_to_tensor(data_sample['init_particles'], dtype=tf.float32)
             init_particle_weights = tf.constant(np.log(1.0/float(num_particles)),
                                         shape=(batch_size, num_particles), dtype=tf.float32)
 
             # start trajectory with initial particles and weights
-            state = [init_particles, init_particle_weights, global_map]
+            state = [init_particles, init_particle_weights, obstacle_map]
 
             # if stateful: reset RNN s.t. initial_state is set to initial particles and weights
             # if non-stateful: pass the state explicity every step

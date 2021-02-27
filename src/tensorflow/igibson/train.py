@@ -62,6 +62,11 @@ def run_training(params):
     # create pf model
     pfnet_model = pfnet.pfnet_model(params)
 
+    # load model from checkpoint file
+    if params.pfnet_load:
+        print("=====> Loading model from " + params.pfnet_load)
+        pfnet_model.load_weights(params.pfnet_load)
+
     # get pretrained action model
     if params.agent == 'pretrained' and params.action_load:
         print("=====> Loading action sampler from " + params.action_load)

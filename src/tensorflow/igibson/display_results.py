@@ -23,7 +23,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 
-def store_results(idx, global_map, particle_states, particle_weights, true_states, params):
+def store_results(idx, obstacle_map, particle_states, particle_weights, true_states, params):
 
     trajlen = params.trajlen
 
@@ -42,7 +42,7 @@ def store_results(idx, global_map, particle_states, particle_weights, true_state
     est_states = tf.stack([part_x, part_y, part_th], axis=-1)
 
     # plot map
-    floor_map = global_map[0].numpy()    # [H, W, 1]
+    floor_map = obstacle_map[0].numpy()    # [H, W, 1]
     map_plt = render.draw_floor_map(floor_map, plt_ax, None)
 
     images = []
@@ -148,13 +148,14 @@ def display_results(params):
         observation = tf.convert_to_tensor(batch_sample['observation'], dtype=tf.float32)
         odometry = tf.convert_to_tensor(batch_sample['odometry'], dtype=tf.float32)
         true_states = tf.convert_to_tensor(batch_sample['true_states'], dtype=tf.float32)
-        global_map = tf.convert_to_tensor(batch_sample['global_map'], dtype=tf.float32)
+        floor_map = tf.convert_to_tensor(batch_sample['floor_map'], dtype=tf.float32)
+        obstacle_map = tf.convert_to_tensor(batch_sample['obstacle_map'], dtype=tf.float32)
         init_particles = tf.convert_to_tensor(batch_sample['init_particles'], dtype=tf.float32)
         init_particle_weights = tf.constant(np.log(1.0/float(num_particles)),
                                     shape=(batch_size, num_particles), dtype=tf.float32)
 
         # start trajectory with initial particles and weights
-        state = [init_particles, init_particle_weights, global_map]
+        state = [init_particles, init_particle_weights, obstacle_map]
 
         # if stateful: reset RNN s.t. initial_state is set to initial particles and weights
         # if non-stateful: pass the state explicity every step
@@ -180,7 +181,7 @@ def display_results(params):
         success_list.append(successful)
 
         # store results as video
-        store_results(idx, global_map, particle_states, particle_weights, true_states, params)
+        store_results(idx, obstacle_map, particle_states, particle_weights, true_states, params)
 
     # report results
     mean_rmse = np.mean(np.sqrt(mse_list)) * 100
