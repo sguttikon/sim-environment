@@ -56,8 +56,8 @@ def run_training(params):
 
     # validation data
     filenames = list(glob.glob(params.testfiles[0]))
-    print(f'validation data: {filenames}')
     test_ds = datautils.get_dataflow(filenames, params.batch_size, is_training=True)
+    print(f'validation data: {filenames}')
 
     # create pf model
     pfnet_model = pfnet.pfnet_model(params)

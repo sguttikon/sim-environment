@@ -8,6 +8,7 @@ def set_path(path: str):
         sys.path.insert(0, path)
 from utils import render, datautils, arguments, pfnet_loss
 from utils.iGibson_env import iGibsonEnv
+import glob
 
 # set programatically the path to 'pfnet' directory (alternately can also set PYTHONPATH)
 set_path('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src/tensorflow/pfnet')
@@ -27,7 +28,7 @@ def store_results(idx, obstacle_map, particle_states, particle_weights, true_sta
 
     trajlen = params.trajlen
 
-    fig = plt.figure(figsize=(7, 7), dpi=300)
+    fig = plt.figure(figsize=(7, 7))
     plt_ax = fig.add_subplot(111)
     canvas = FigureCanvasAgg(fig)
 
@@ -65,19 +66,19 @@ def store_results(idx, obstacle_map, particle_states, particle_weights, true_sta
         position_plt, heading_plt = gt_plt['robot_position'], gt_plt['robot_heading']
         gt_plt['robot_position'], gt_plt['robot_heading'] = render.draw_robot_pose(
                         true_state[0], '#7B241C', floor_map.shape, plt_ax,
-                        position_plt, heading_plt)
+                        position_plt, heading_plt, params.map_pixel_in_meters)
 
         # plot est robot pose
         position_plt, heading_plt = est_plt['robot_position'], est_plt['robot_heading']
         est_plt['robot_position'], est_plt['robot_heading'] = render.draw_robot_pose(
                         est_state[0], '#515A5A', floor_map.shape, plt_ax,
-                        position_plt, heading_plt)
+                        position_plt, heading_plt, params.map_pixel_in_meters)
 
         # plot est pose particles
         particles_plt = est_plt['particles']
         est_plt['particles'] = render.draw_particles_pose(
                             particle_state[0], lin_weight[0],
-                            floor_map.shape, particles_plt)
+                            floor_map.shape, particles_plt, params.map_pixel_in_meters)
 
         plt_ax.legend([gt_plt['robot_position'], est_plt['robot_position']], ["gt_pose", "est_pose"])
 
@@ -111,9 +112,9 @@ def display_results(params):
     num_particles = params.num_particles
 
     # evaluation data
-    # filenames = list(glob.glob(params.testfiles[0]))
-    filenames = params.testfiles
+    filenames = list(glob.glob(params.testfiles[0]))
     test_ds = datautils.get_dataflow(filenames, params.batch_size, is_training=True)
+    print(f'test data: {filenames}')
 
     # create gym env
     env = iGibsonEnv(config_file=params.config_filename, mode=params.mode,

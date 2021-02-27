@@ -7,7 +7,6 @@ from tqdm import tqdm
 import numpy as np
 import glob
 
-
 import sys
 def set_path(path: str):
     try:
@@ -16,6 +15,7 @@ def set_path(path: str):
         sys.path.insert(0, path)
 # set programatically the path to 'pfnet' directory (alternately can also set PYTHONPATH)
 set_path('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src/tensorflow/pfnet')
+# set_path('/home/guttikon/awesome_robotics/sim-environment/src/tensorflow/pfnet')
 import pfnet
 
 def dataset_size():
@@ -36,9 +36,9 @@ def run_evaluation(params):
     num_batches = dataset_size() // batch_size
 
     # evaluation data
-    # filenames = list(glob.glob(params.testfiles[0]))
-    filenames = params.testfiles
+    filenames = list(glob.glob(params.testfiles[0]))
     test_ds = datautils.get_dataflow(filenames, params.batch_size, is_training=False)
+    print(f'test data: {filenames}')
 
     # create gym env
     env = iGibsonEnv(config_file=params.config_filename, mode=params.mode,
@@ -62,14 +62,14 @@ def run_evaluation(params):
         # run evaluation over all evaluation samples in an epoch
         for idx in tqdm(range(num_batches)):
             parsed_record = next(itr)
-            data_sample = datautils.transform_raw_record(env, parsed_record, params)
+            batch_sample = datautils.transform_raw_record(env, parsed_record, params)
 
-            observations = tf.convert_to_tensor(data_sample['observation'], dtype=tf.float32)
-            odometry = tf.convert_to_tensor(data_sample['odometry'], dtype=tf.float32)
-            true_states = tf.convert_to_tensor(data_sample['true_states'], dtype=tf.float32)
+            observations = tf.convert_to_tensor(batch_sample['observation'], dtype=tf.float32)
+            odometry = tf.convert_to_tensor(batch_sample['odometry'], dtype=tf.float32)
+            true_states = tf.convert_to_tensor(batch_sample['true_states'], dtype=tf.float32)
             floor_map = tf.convert_to_tensor(batch_sample['floor_map'], dtype=tf.float32)
             obstacle_map = tf.convert_to_tensor(batch_sample['obstacle_map'], dtype=tf.float32)
-            init_particles = tf.convert_to_tensor(data_sample['init_particles'], dtype=tf.float32)
+            init_particles = tf.convert_to_tensor(batch_sample['init_particles'], dtype=tf.float32)
             init_particle_weights = tf.constant(np.log(1.0/float(num_particles)),
                                         shape=(batch_size, num_particles), dtype=tf.float32)
 

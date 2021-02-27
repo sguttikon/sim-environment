@@ -24,18 +24,23 @@ def draw_floor_map(floor_map, plt_ax, map_plt):
         pass
     return map_plt
 
-def draw_particles_pose(particles, weights, map_shape, particles_plt):
+def draw_particles_pose(particles, weights, map_shape, particles_plt, scale=1):
     """
     Render the particle poses on the scene floor map
     :param ndarray particles: estimates of particle pose
     :param ndarray weights: corresponding weights of particle pose estimates
     :param tuple map_shape: [height, width, channel] of the map the co-ordinated need to be transformed
     :param matplotlib.collections.PathCollection: plot of particle position color coded according to weights
+    :param scale: integer rescaling value
     :return matplotlib.collections.PathCollection: updated plot of particles
     """
 
     part_x, part_y, part_th = tf.unstack(particles, axis=-1, num=3)   # (k, 3)
     height, width, channel = map_shape
+
+    # rescale
+    part_x = part_x / scale
+    part_y = part_y / scale
 
     # flip image changes
     part_y = height - part_y
@@ -52,7 +57,7 @@ def draw_particles_pose(particles, weights, map_shape, particles_plt):
 
     return particles_plt
 
-def draw_robot_pose(robot_pose, color, map_shape, plt_ax, position_plt, heading_plt):
+def draw_robot_pose(robot_pose, color, map_shape, plt_ax, position_plt, heading_plt, scale=1):
     """
     Render the robot pose on the scene floor map
     :param ndarray robot_pose: ndarray representing robot position (x, y) and heading (theta)
@@ -61,17 +66,22 @@ def draw_robot_pose(robot_pose, color, map_shape, plt_ax, position_plt, heading_
     :param matplotlib.axes.Axes plt_ax: figure sub plot instance
     :param matplotlib.patches.Wedge position_plt: plot of robot position
     :param matplotlib.lines.Line2D heading_plt: plot of robot heading
+    :param scale: integer rescaling value
     :return tuple(matplotlib.patches.Wedge, matplotlib.lines.Line2D): updated position and heading plot of robot
     """
 
     x, y, heading = robot_pose
     height, width, channel = map_shape
 
+    # rescale
+    x = x / scale
+    y = y / scale
+
     # flip image changes
     y = height - y
     heading = -heading
 
-    heading_len  = robot_radius = 1.0
+    heading_len  = robot_radius = 1.0 / scale
     xdata = [x, x + (robot_radius + heading_len) * np.cos(heading)]
     ydata = [y, y + (robot_radius + heading_len) * np.sin(heading)]
 
