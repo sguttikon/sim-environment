@@ -194,8 +194,10 @@ def gather_episode_stats(env, params, action_model, sample_particles=False):
     obs = env.reset()   # already processed
     observation.append(obs)
 
-    global_map = env.get_floor_map()    # already processed
-    assert list(global_map.shape) == list(map_size)
+    floor_map = env.get_floor_map()    # already processed
+    obstacle_map = env.get_obstacle_map()   # already processed
+    assert list(floor_map.shape) == list(map_size)
+    assert list(obstacle_map.shape) == list(map_size)
 
     old_pose = env.get_robot_state()['pose']
     assert list(old_pose.shape) == [3]
@@ -236,12 +238,14 @@ def gather_episode_stats(env, params, action_model, sample_particles=False):
         init_particle_weights = np.full((num_particles, ), (1./num_particles))
         assert list(init_particles.shape) == [num_particles, 3]
         assert list(init_particle_weights.shape) == [num_particles]
+
     else:
         init_particles = None
         init_particle_weights = None
 
     episode_data = {}
-    episode_data['global_map'] = global_map # (height, width, 1)
+    episode_data['floor_map'] = floor_map # (height, width, 1)
+    episode_data['obstacle_map'] = obstacle_map # (height, width, 1)
     episode_data['odometry'] = np.stack(odometry)  # (trajlen, 3)
     episode_data['true_states'] = np.stack(true_poses)  # (trajlen, 3)
     episode_data['observation'] = np.stack(observation) # (trajlen, height, width, 3)
@@ -265,7 +269,8 @@ def get_batch_data(env, params, action_model):
     num_particles = params.num_particles
 
     odometry = []
-    global_map = []
+    floor_map = []
+    obstacle_map = []
     observation = []
     true_states = []
     init_particles = []
@@ -275,7 +280,8 @@ def get_batch_data(env, params, action_model):
         episode_data = gather_episode_stats(env, params, action_model, True)
 
         odometry.append(episode_data['odometry'])
-        global_map.append(episode_data['global_map'])
+        floor_map.append(episode_data['floor_map'])
+        obstacle_map.append(episode_data['obstacle_map'])
         true_states.append(episode_data['true_states'])
         observation.append(episode_data['observation'])
         init_particles.append(episode_data['init_particles'])
@@ -283,7 +289,8 @@ def get_batch_data(env, params, action_model):
 
     batch_data = {}
     batch_data['odometry'] = np.stack(odometry)
-    batch_data['global_map'] = np.stack(global_map)
+    batch_data['floor_map'] = np.stack(floor_map)
+    batch_data['obstacle_map'] = np.stack(obstacle_map)
     batch_data['true_states'] = np.stack(true_states)
     batch_data['observation'] = np.stack(observation)
     batch_data['init_particles'] = np.stack(init_particles)
@@ -295,7 +302,8 @@ def get_batch_data(env, params, action_model):
     assert list(batch_data['observation'].shape) == [batch_size, trajlen, 56, 56, 3]
     assert list(batch_data['init_particles'].shape) == [batch_size, num_particles, 3]
     assert list(batch_data['init_particle_weights'].shape) == [batch_size, num_particles]
-    assert list(batch_data['global_map'].shape) == [batch_size, map_size[0], map_size[1], map_size[2]]
+    assert list(batch_data['floor_map'].shape) == [batch_size, map_size[0], map_size[1], map_size[2]]
+    assert list(batch_data['obstacle_map'].shape) == [batch_size, map_size[0], map_size[1], map_size[2]]
 
     return batch_data
 
@@ -307,8 +315,9 @@ def serialize_tf_record(episode_data):
     """
     states = episode_data['true_states']
     odometry = episode_data['odometry']
-    global_map = episode_data['global_map']
     observation = episode_data['observation']
+    floor_map = episode_data['floor_map']
+    obstacle_map = episode_data['obstacle_map']
     # init_particles = episode_data['init_particles']
     # init_particle_weights = episode_data['init_particle_weights']
 
@@ -317,10 +326,12 @@ def serialize_tf_record(episode_data):
         'state_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=states.shape)),
         'odometry': tf.train.Feature(float_list=tf.train.FloatList(value=odometry.flatten())),
         'odometry_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=odometry.shape)),
-        'global_map': tf.train.Feature(float_list=tf.train.FloatList(value=global_map.flatten())),
-        'global_map_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=global_map.shape)),
         'observation': tf.train.Feature(float_list=tf.train.FloatList(value=observation.flatten())),
         'observation_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=observation.shape)),
+        'floor_map': tf.train.Feature(float_list=tf.train.FloatList(value=floor_map.flatten())),
+        'floor_map_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=floor_map.shape)),
+        'obstacle_map': tf.train.Feature(float_list=tf.train.FloatList(value=obstacle_map.flatten())),
+        'obstacle_map_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=obstacle_map.shape)),
         # 'init_particles': tf.train.Feature(float_list=tf.train.FloatList(value=init_particles.flatten())),
         # 'init_particles_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=init_particles.shape)),
         # 'init_particle_weights': tf.train.Feature(float_list=tf.train.FloatList(value=init_particle_weights.flatten())),
@@ -340,10 +351,12 @@ def deserialize_tf_record(raw_record):
         'state_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
         'odometry': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
         'odometry_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
-        'global_map': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
-        'global_map_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
         'observation': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
         'observation_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
+        'floor_map': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
+        'floor_map_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
+        'obstacle_map': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
+        'obstacle_map_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
         # 'init_particles': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
         # 'init_particles_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
         # 'init_particle_weights': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
@@ -381,6 +394,7 @@ def transform_raw_record(env, parsed_record, params):
     num_particles = params.num_particles
     particles_cov = params.init_particles_cov
     particles_distr = params.init_particles_distr
+    map_pixel_in_meters = params.map_pixel_in_meters
 
     trans_record['observation'] = parsed_record['observation'].reshape(
                 [batch_size] + list(parsed_record['observation_shape'][0]))[:, :trajlen]
@@ -388,8 +402,10 @@ def transform_raw_record(env, parsed_record, params):
                 [batch_size] + list(parsed_record['odometry_shape'][0]))[:, :trajlen]
     trans_record['true_states'] = parsed_record['state'].reshape(
                 [batch_size] + list(parsed_record['state_shape'][0]))[:, :trajlen]
-    trans_record['global_map'] = parsed_record['global_map'].reshape(
-                [batch_size] + list(parsed_record['global_map_shape'][0]))
+
+    # get floor and obstance map of environment scene
+    trans_record['obstacle_map'] = tf.tile(tf.expand_dims(env.get_obstacle_map(), axis=0), [batch_size, 1, 1, 1])
+    trans_record['floor_map'] = tf.tile(tf.expand_dims(env.get_floor_map(), axis=0), [batch_size, 1, 1, 1])
 
     # sample random particles and corresponding weights
     trans_record['init_particles'] = env.get_random_particles(num_particles, particles_distr, trans_record['true_states'][:, 0, :], particles_cov)
@@ -399,6 +415,7 @@ def transform_raw_record(env, parsed_record, params):
     assert list(trans_record['true_states'].shape) == [batch_size, trajlen, 3]
     assert list(trans_record['observation'].shape) == [batch_size, trajlen, 56, 56, 3]
     assert list(trans_record['init_particles'].shape) == [batch_size, num_particles, 3]
-    assert list(trans_record['global_map'].shape) == [batch_size, map_size[0], map_size[1], map_size[2]]
+    assert list(trans_record['floor_map'].shape) == [batch_size, map_size[0], map_size[1], map_size[2]]
+    assert list(trans_record['obstacle_map'].shape) == [batch_size, map_size[0]/map_pixel_in_meters, map_size[1]/map_pixel_in_meters, map_size[2]]
 
     return trans_record

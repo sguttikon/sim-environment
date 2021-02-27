@@ -91,7 +91,8 @@ def run_training(params):
             # batch_sample = datautils.get_batch_data(env, params, action_model)
 
             odometry = tf.convert_to_tensor(batch_sample['odometry'], dtype=tf.float32)
-            global_map = tf.convert_to_tensor(batch_sample['global_map'], dtype=tf.float32)
+            floor_map = tf.convert_to_tensor(batch_sample['floor_map'], dtype=tf.float32)
+            obstacle_map = tf.convert_to_tensor(batch_sample['obstacle_map'], dtype=tf.float32)
             observation = tf.convert_to_tensor(batch_sample['observation'], dtype=tf.float32)
             true_states = tf.convert_to_tensor(batch_sample['true_states'], dtype=tf.float32)
             init_particles = tf.convert_to_tensor(batch_sample['init_particles'], dtype=tf.float32)
@@ -99,7 +100,7 @@ def run_training(params):
                                         shape=(batch_size, num_particles), dtype=tf.float32)
 
             # start trajectory with initial particles and weights
-            state = [init_particles, init_particle_weights, global_map]
+            state = [init_particles, init_particle_weights, obstacle_map]
 
             # if stateful: reset RNN s.t. initial_state is set to initial particles and weights
             # if non-stateful: pass the state explicity every step
@@ -145,7 +146,8 @@ def run_training(params):
                 # batch_sample = datautils.get_batch_data(env, params, action_model)
 
                 odometry = tf.convert_to_tensor(batch_sample['odometry'], dtype=tf.float32)
-                global_map = tf.convert_to_tensor(batch_sample['global_map'], dtype=tf.float32)
+                floor_map = tf.convert_to_tensor(batch_sample['floor_map'], dtype=tf.float32)
+                obstacle_map = tf.convert_to_tensor(batch_sample['obstacle_map'], dtype=tf.float32)
                 observation = tf.convert_to_tensor(batch_sample['observation'], dtype=tf.float32)
                 true_states = tf.convert_to_tensor(batch_sample['true_states'], dtype=tf.float32)
                 init_particles = tf.convert_to_tensor(batch_sample['init_particles'], dtype=tf.float32)
@@ -153,7 +155,7 @@ def run_training(params):
                                             shape=(batch_size, num_particles), dtype=tf.float32)
 
                 # start trajectory with initial particles and weights
-                state = [init_particles, init_particle_weights, global_map]
+                state = [init_particles, init_particle_weights, obstacle_map]
 
                 # if stateful: reset RNN s.t. initial_state is set to initial particles and weights
                 # if non-stateful: pass the state explicity every step

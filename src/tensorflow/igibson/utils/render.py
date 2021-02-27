@@ -18,7 +18,7 @@ def draw_floor_map(floor_map, plt_ax, map_plt):
     if map_plt is None:
         # draw floor map
         floor_map = cv2.flip(floor_map, 0)  # flip image
-        map_plt = plt_ax.imshow(floor_map)
+        map_plt = plt_ax.imshow(floor_map, cmap='gray')
     else:
         # do nothing
         pass

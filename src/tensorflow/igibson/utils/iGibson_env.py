@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 
+import os
 import gym
+import cv2
 import numpy as np
 import pybullet as p
+from PIL import Image
 import matplotlib.pyplot as plt
 from collections import OrderedDict
 from utils import render, datautils
 from gibson2.envs.env_base import BaseEnv
+from gibson2.utils.assets_utils import get_scene_path
 from gibson2.sensors.vision_sensor import VisionSensor
 from gibson2.termination_conditions.timeout import Timeout
 from gibson2.external.pybullet_tools.utils import stable_z_on_aabb
@@ -203,7 +207,7 @@ class iGibsonEnv(BaseEnv):
 
     def get_floor_map(self):
         """
-        Get the scene floor map
+        Get the scene floor map (traversability map + obstacle map)
         :return ndarray: floor map of current scene (H, W, 1)
         """
         floor_map = self.scene.floor_map[self.floor_num]
@@ -211,6 +215,24 @@ class iGibsonEnv(BaseEnv):
         floor_map = datautils.process_floor_map(floor_map)
 
         return floor_map
+
+    def get_obstacle_map(self):
+        """
+        Get the scene obstacle map
+        """
+        obstacle_map = np.array(Image.open(
+                    os.path.join(get_scene_path(self.config.get('scene_id')),
+                            f'floor_{self.floor_num}.png')
+                ))
+        
+        # # rescale
+        # obstacle_map = cv2.resize(
+        #         obstacle_map, (self.scene.trav_map_size, self.scene.trav_map_size))
+
+        # process image for training
+        obstacle_map = datautils.process_floor_map(obstacle_map)
+
+        return obstacle_map
 
     def get_robot_state(self):
         """

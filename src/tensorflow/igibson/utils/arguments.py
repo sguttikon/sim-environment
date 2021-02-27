@@ -73,9 +73,10 @@ def parse_args():
     params.stateful = False
     params.return_state = True
 
-    #HACK hardcode for floor map
+    #HACK hardcode for floor map/obstacle map
     params.global_map_size = (100, 100, 1)
-    params.window_scaler = None
+    params.window_scaler = 8.0
+    params.scale_in_local_maps = True
 
     # filter out info and warning messages
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
