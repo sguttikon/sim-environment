@@ -15,10 +15,12 @@ def draw_floor_map(floor_map, plt_ax, map_plt):
     :return matplotlib.image.AxesImage: updated plot of scene floor map
     """
 
+    origin_x, origin_y = floor_map.shape[1]/2, floor_map.shape[0]/2
     if map_plt is None:
         # draw floor map
         floor_map = cv2.flip(floor_map, 0)  # flip image
         map_plt = plt_ax.imshow(floor_map, cmap='gray')
+        plt.scatter(origin_x, origin_y, s=10, c='black', marker='x', alpha=1)
     else:
         # do nothing
         pass
@@ -81,7 +83,7 @@ def draw_robot_pose(robot_pose, color, map_shape, plt_ax, position_plt, heading_
     y = height - y
     heading = -heading
 
-    heading_len  = robot_radius = 1.0 / scale
+    heading_len  = robot_radius = 10.0
     xdata = [x, x + (robot_radius + heading_len) * np.cos(heading)]
     ydata = [y, y + (robot_radius + heading_len) * np.sin(heading)]
 

@@ -21,10 +21,10 @@ def parse_args():
     argparser.add_argument('--testfiles', nargs='*', default=['./data/valid.tfrecords'], help='Data file(s) for validation or evaluation (tfrecord).')
 
     # input configuration
-    argparser.add_argument('--map_pixel_in_meters', type=float, default=0.1, help='The width (and height) of a pixel of the map in meters. Defaults to 0.1 for iGibson environment [trav_map_resolution].')
+    argparser.add_argument('--map_pixel_in_meters', type=float, default=1, help='The width (and height) of a pixel of the map in meters. Defaults to 0.1 for iGibson environment [trav_map_resolution].')
     argparser.add_argument('--agent', type=str, default='random', help='Agent used to sample actions in environment. Possible values: random / pretrained / manual.')
     argparser.add_argument('--init_particles_distr', type=str, default='gaussian', help='Distribution of initial particles. Possible values: gaussian / uniform.')
-    argparser.add_argument('--init_particles_std', nargs='*', default=["0.15", "0.523599"], help='Standard deviations for generated initial particles for tracking distribution. Values: translation std (meters), rotation std (radians)')
+    argparser.add_argument('--init_particles_std', nargs='*', default=["15", "0.523599"], help='Standard deviations for generated initial particles for tracking distribution. Values: translation std (meters), rotation std (radians)')
     argparser.add_argument('--trajlen', type=int, default=24, help='Length of trajectories.')
 
     # PF configuration
@@ -61,9 +61,11 @@ def parse_args():
 
     # build initial covariance matrix of particles, in pixels and radians
     particle_std = params.init_particles_std.copy()
-    particle_std[0] = particle_std[0] / params.map_pixel_in_meters  # convert meters to pixels
+    # particle_std[0] = particle_std[0] / params.map_pixel_in_meters  # convert meters to pixels
     particle_std2 = np.square(particle_std)  # variance
     params.init_particles_cov = np.diag(particle_std2[(0, 0, 1),])
+
+    # params.transition_std = np.array(params.transition_std[0] / params.map_pixel_in_meters, params.transition_std[1])   # in pixels & radians
 
     # fix seed
     np.random.seed(params.seed)
@@ -76,7 +78,6 @@ def parse_args():
     #HACK hardcode for floor map/obstacle map
     params.global_map_size = (1000, 1000, 1)
     params.window_scaler = 8.0
-    params.scale_in_local_maps = True
 
     # filter out info and warning messages
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'

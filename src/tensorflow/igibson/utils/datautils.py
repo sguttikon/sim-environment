@@ -153,19 +153,19 @@ def load_action_model(env, device, path):
 
     return model
 
-def transform_pose(position, map_shape, map_pixel_in_meters):
+def transform_pose(position, map_shape, map_resolution):
     """
     Transform pose from 2D co-ordinate space to pixel space
     :param ndarray position: pose [x, y] in co-ordinate space
     :param tuple map_shape: [height, width, channel] of the map the co-ordinated need to be transformed
-    :param int map_pixel_in_meters: The width (and height) of a pixel of the map in meters
+    :param int map_resolution: The width (and height) of a pixel of the map in meters
     :return ndarray: pose [x, y, theta] in pixel space of map
     """
     x, y = position
     height, width, channel = map_shape
 
-    x = (x / map_pixel_in_meters) + width/2
-    y = (y / map_pixel_in_meters) + height/2
+    x = (x / map_resolution) + width/2
+    y = (y / map_resolution) + height/2
 
     return np.array([x, y])
 
@@ -394,7 +394,6 @@ def transform_raw_record(env, parsed_record, params):
     num_particles = params.num_particles
     particles_cov = params.init_particles_cov
     particles_distr = params.init_particles_distr
-    map_pixel_in_meters = params.map_pixel_in_meters
 
     trans_record['observation'] = parsed_record['observation'].reshape(
                 [batch_size] + list(parsed_record['observation_shape'][0]))[:, :trajlen]

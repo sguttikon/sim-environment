@@ -55,6 +55,8 @@ def parse_args():
     particle_std2 = np.square(particle_std)  # variance
     params.init_particles_cov = np.diag(particle_std2[(0, 0, 1),])
 
+    params.transition_std = np.array(params.transition_std[0] / params.map_pixel_in_meters, params.transition_std[1])   # in pixels & radians
+
     # fix seed
     np.random.seed(params.seed)
     tf.random.set_seed(params.seed)
@@ -66,7 +68,6 @@ def parse_args():
     #HACK hardcode fix padding for map
     params.global_map_size = (4000, 4000, 1)
     params.window_scaler = 8.0
-    params.scale_in_local_maps = False
 
     # filter out info and warning messages
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'

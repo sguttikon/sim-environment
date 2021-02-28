@@ -211,6 +211,9 @@ class iGibsonEnv(BaseEnv):
         :return ndarray: floor map of current scene (H, W, 1)
         """
         # floor_map = self.scene.floor_map[self.floor_num]
+        #
+        # # process image for training
+        # floor_map = datautils.process_floor_map(floor_map)
 
         obstacle_map = np.array(Image.open(
                     os.path.join(get_scene_path(self.config.get('scene_id')),
@@ -223,6 +226,10 @@ class iGibsonEnv(BaseEnv):
                 ))
 
         trav_map[obstacle_map == 0] = 0
+
+        trav_map_erosion=self.config.get('trav_map_erosion', 2)
+        trav_map = cv2.erode(trav_map, np.ones((trav_map_erosion, trav_map_erosion)))
+        trav_map[trav_map < 255] = 0
 
         # process image for training
         floor_map = datautils.process_floor_map(trav_map)
@@ -263,7 +270,7 @@ class iGibsonEnv(BaseEnv):
         robot_orn = p.getEulerFromQuaternion(self.robots[0].get_orientation())  # [r, p, y]
 
         # transform from co-ordinate space to pixel space
-        robot_pos = datautils.transform_pose(robot_pos[:2], floor_map.shape, self.trav_map_resolution)  # [x, y]
+        robot_pos = datautils.transform_pose(robot_pos[:2], floor_map.shape, self.trav_map_resolution**2)  # [x, y]
 
         robot_state['pose'] = np.array([robot_pos[0], robot_pos[1], robot_orn[2]])  # [x, y, theta]
 
@@ -556,17 +563,27 @@ class iGibsonEnv(BaseEnv):
 
         particles = []
         if particles_distr == 'uniform':
+            # get bounding box for more efficient sampling
+            rmin, rmax, cmin, cmax = self.bounding_box(floor_map)
+
             # iterate per batch_size
             for b_idx in range(batches):
                 sample_i = 0
                 b_particles = []
-                while sample_i < num_particles:
-                    pos, orn = self.sample_random_pose()
-                    orn = p.getEulerFromQuaternion(orn) # [r, p, y]
 
-                    # transform from co-ordinate space to pixel space
-                    pos = datautils.transform_pose(pos[:2], floor_map.shape, self.trav_map_resolution)  # [x, y]
-                    b_particles.append([pos[0], pos[1], orn[2]])  # [x, y, theta]
+                while sample_i < num_particles:
+                    # pos, orn = self.sample_random_pose()
+                    # orn = p.getEulerFromQuaternion(orn) # [r, p, y]
+                    #
+                    # # transform from co-ordinate space to pixel space
+                    # pos = datautils.transform_pose(pos[:2], floor_map.shape, self.trav_map_resolution)  # [x, y]
+                    # b_particles.append([pos[0], pos[1], orn[2]])  # [x, y, theta]
+
+                    particle = np.random.uniform(low=(cmin, rmin, 0.0), high=(cmax, rmax, 2.0*np.pi), size=(3, ))
+                    # reject if mask is zero
+                    if not floor_map[int(np.rint(particle[1])), int(np.rint(particle[0]))]:
+                        continue
+                    b_particles.append(particle)
 
                     sample_i = sample_i + 1
                 particles.append(b_particles)
@@ -583,6 +600,19 @@ class iGibsonEnv(BaseEnv):
 
         particles = np.stack(particles) # [batch_size, num_particles, 3]
         return particles
+
+    def bounding_box(self, img):
+        """
+        Bounding box of non-zeros in an array.
+        :param img: numpy array
+        :return (int, int, int, int): bounding box indices top_row, bottom_row, left_column, right_column
+        """
+        rows = np.any(img, axis=1)
+        cols = np.any(img, axis=0)
+        rmin, rmax = np.where(rows)[0][[0, -1]]
+        cmin, cmax = np.where(cols)[0][[0, -1]]
+
+        return rmin, rmax, cmin, cmax
 
     def filter_collision_links(self, collision_links):
         """

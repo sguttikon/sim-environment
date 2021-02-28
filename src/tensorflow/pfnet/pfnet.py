@@ -104,16 +104,8 @@ class PFCell(keras.layers.AbstractRNNCell):
 
         batch_size, num_particles = particle_states.shape.as_list()[:2]
 
-        if self.params.scale_in_local_maps:
-            part_x, part_y, part_th = tf.unstack(particle_states, axis=-1, num=3)
-            part_x = part_x / self.params.map_pixel_in_meters
-            part_y = part_y / self.params.map_pixel_in_meters
-            scaled_particle_states = tf.stack([part_x , part_y, part_th], axis=-1)   # (bs, k, 3)
-        else:
-            scaled_particle_states = particle_states
-
         # transform global maps to local maps
-        local_maps = self.transform_maps(global_map, scaled_particle_states, (28, 28), self.params.window_scaler)
+        local_maps = self.transform_maps(global_map, particle_states, (28, 28), self.params.window_scaler)
 
         # rescale from [0, 2] to [-1, 1]    -> optional
         local_maps = -(local_maps - 1)
@@ -207,8 +199,8 @@ class PFCell(keras.layers.AbstractRNNCell):
         :return (batch, k, 3): particle states updated with the odometry and optionally transition noise
         """
 
-        translation_std = self.params.transition_std[0] / self.params.map_pixel_in_meters   # in pixels
-        rotation_std = self.params.transition_std[1]
+        translation_std = self.params.transition_std[0]   # in pixels
+        rotation_std = self.params.transition_std[1]    # in radians
 
         part_x, part_y, part_th = tf.unstack(particle_states, axis=-1, num=3)   # (bs, k, 3)
 
