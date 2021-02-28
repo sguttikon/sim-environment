@@ -210,9 +210,22 @@ class iGibsonEnv(BaseEnv):
         Get the scene floor map (traversability map + obstacle map)
         :return ndarray: floor map of current scene (H, W, 1)
         """
-        floor_map = self.scene.floor_map[self.floor_num]
+        # floor_map = self.scene.floor_map[self.floor_num]
+
+        obstacle_map = np.array(Image.open(
+                    os.path.join(get_scene_path(self.config.get('scene_id')),
+                            f'floor_{self.floor_num}.png')
+                ))
+
+        trav_map = np.array(Image.open(
+                    os.path.join(get_scene_path(self.config.get('scene_id')),
+                            f'floor_trav_{self.floor_num}.png')
+                ))
+
+        trav_map[obstacle_map == 0] = 0
+
         # process image for training
-        floor_map = datautils.process_floor_map(floor_map)
+        floor_map = datautils.process_floor_map(trav_map)
 
         return floor_map
 
@@ -224,7 +237,7 @@ class iGibsonEnv(BaseEnv):
                     os.path.join(get_scene_path(self.config.get('scene_id')),
                             f'floor_{self.floor_num}.png')
                 ))
-        
+
         # # rescale
         # obstacle_map = cv2.resize(
         #         obstacle_map, (self.scene.trav_map_size, self.scene.trav_map_size))

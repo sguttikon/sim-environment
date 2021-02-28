@@ -416,6 +416,6 @@ def transform_raw_record(env, parsed_record, params):
     assert list(trans_record['observation'].shape) == [batch_size, trajlen, 56, 56, 3]
     assert list(trans_record['init_particles'].shape) == [batch_size, num_particles, 3]
     assert list(trans_record['floor_map'].shape) == [batch_size, map_size[0], map_size[1], map_size[2]]
-    assert list(trans_record['obstacle_map'].shape) == [batch_size, map_size[0]/map_pixel_in_meters, map_size[1]/map_pixel_in_meters, map_size[2]]
+    assert list(trans_record['obstacle_map'].shape) == [batch_size, map_size[0], map_size[1], map_size[2]]
 
     return trans_record

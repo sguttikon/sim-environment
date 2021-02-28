@@ -74,7 +74,7 @@ def parse_args():
     params.return_state = True
 
     #HACK hardcode for floor map/obstacle map
-    params.global_map_size = (100, 100, 1)
+    params.global_map_size = (1000, 1000, 1)
     params.window_scaler = 8.0
     params.scale_in_local_maps = True
 
