@@ -66,19 +66,19 @@ def store_results(idx, obstacle_map, particle_states, particle_weights, true_sta
         position_plt, heading_plt = gt_plt['robot_position'], gt_plt['robot_heading']
         gt_plt['robot_position'], gt_plt['robot_heading'] = render.draw_robot_pose(
                         true_state[0], '#7B241C', floor_map.shape, plt_ax,
-                        position_plt, heading_plt, params.map_pixel_in_meters)
+                        position_plt, heading_plt)
 
         # plot est robot pose
         position_plt, heading_plt = est_plt['robot_position'], est_plt['robot_heading']
         est_plt['robot_position'], est_plt['robot_heading'] = render.draw_robot_pose(
                         est_state[0], '#515A5A', floor_map.shape, plt_ax,
-                        position_plt, heading_plt, params.map_pixel_in_meters)
+                        position_plt, heading_plt)
 
         # plot est pose particles
         particles_plt = est_plt['particles']
         est_plt['particles'] = render.draw_particles_pose(
                             particle_state[0], lin_weight[0],
-                            floor_map.shape, particles_plt, params.map_pixel_in_meters)
+                            floor_map.shape, particles_plt)
 
         plt_ax.legend([gt_plt['robot_position'], est_plt['robot_position']], ["gt_pose", "est_pose"])
 

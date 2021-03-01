@@ -316,8 +316,8 @@ def serialize_tf_record(episode_data):
     states = episode_data['true_states']
     odometry = episode_data['odometry']
     observation = episode_data['observation']
-    floor_map = episode_data['floor_map']
-    obstacle_map = episode_data['obstacle_map']
+    # floor_map = episode_data['floor_map']
+    # obstacle_map = episode_data['obstacle_map']
     # init_particles = episode_data['init_particles']
     # init_particle_weights = episode_data['init_particle_weights']
 
@@ -328,10 +328,10 @@ def serialize_tf_record(episode_data):
         'odometry_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=odometry.shape)),
         'observation': tf.train.Feature(float_list=tf.train.FloatList(value=observation.flatten())),
         'observation_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=observation.shape)),
-        'floor_map': tf.train.Feature(float_list=tf.train.FloatList(value=floor_map.flatten())),
-        'floor_map_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=floor_map.shape)),
-        'obstacle_map': tf.train.Feature(float_list=tf.train.FloatList(value=obstacle_map.flatten())),
-        'obstacle_map_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=obstacle_map.shape)),
+        # 'floor_map': tf.train.Feature(float_list=tf.train.FloatList(value=floor_map.flatten())),
+        # 'floor_map_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=floor_map.shape)),
+        # 'obstacle_map': tf.train.Feature(float_list=tf.train.FloatList(value=obstacle_map.flatten())),
+        # 'obstacle_map_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=obstacle_map.shape)),
         # 'init_particles': tf.train.Feature(float_list=tf.train.FloatList(value=init_particles.flatten())),
         # 'init_particles_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=init_particles.shape)),
         # 'init_particle_weights': tf.train.Feature(float_list=tf.train.FloatList(value=init_particle_weights.flatten())),
@@ -353,10 +353,10 @@ def deserialize_tf_record(raw_record):
         'odometry_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
         'observation': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
         'observation_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
-        'floor_map': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
-        'floor_map_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
-        'obstacle_map': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
-        'obstacle_map_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
+        # 'floor_map': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
+        # 'floor_map_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
+        # 'obstacle_map': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
+        # 'obstacle_map_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
         # 'init_particles': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
         # 'init_particles_shape': tf.io.FixedLenSequenceFeature((), dtype=tf.int64, allow_missing=True),
         # 'init_particle_weights': tf.io.FixedLenSequenceFeature((), dtype=tf.float32, allow_missing=True),
