@@ -563,13 +563,15 @@ class iGibsonEnv(BaseEnv):
 
         particles = []
         if particles_distr == 'uniform':
-            # get bounding box for more efficient sampling
-            rmin, rmax, cmin, cmax = self.bounding_box(floor_map)
 
             # iterate per batch_size
             for b_idx in range(batches):
                 sample_i = 0
                 b_particles = []
+
+                # get bounding box for more efficient sampling
+                # rmin, rmax, cmin, cmax = self.bounding_box(floor_map)
+                rmin, rmax, cmin, cmax = self.bounding_box(floor_map, robot_pose[b_idx])
 
                 while sample_i < num_particles:
                     # pos, orn = self.sample_random_pose()
@@ -601,16 +603,27 @@ class iGibsonEnv(BaseEnv):
         particles = np.stack(particles) # [batch_size, num_particles, 3]
         return particles
 
-    def bounding_box(self, img):
+    def bounding_box(self, img, robot_pose=None, lmt=100):
         """
         Bounding box of non-zeros in an array.
         :param img: numpy array
+        :param robot_pose: numpy array of robot pose
+        :param lmt: integer representing width/length of bounding box
         :return (int, int, int, int): bounding box indices top_row, bottom_row, left_column, right_column
         """
         rows = np.any(img, axis=1)
         cols = np.any(img, axis=0)
         rmin, rmax = np.where(rows)[0][[0, -1]]
         cmin, cmax = np.where(cols)[0][[0, -1]]
+
+        if robot_pose is not None:
+            # futher constraint the bounding box
+            x, y, _ = robot_pose
+
+            rmin = np.rint(y-lmt) if (y-lmt) > rmin else rmin
+            rmax = np.rint(y+lmt) if (y+lmt) < rmax else rmax
+            cmin = np.rint(x-lmt) if (x-lmt) > cmin else cmin
+            cmax = np.rint(x+lmt) if (x+lmt) < cmax else cmax
 
         return rmin, rmax, cmin, cmax
 
