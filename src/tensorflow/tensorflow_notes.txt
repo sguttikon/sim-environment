@@ -158,3 +158,25 @@ train_dataset_size = 200
 valid_dataset_size = 40
 run_validation = True
 nohup python train.py --batch_size 4 --learningrate 0.0001 --epochs 100 --num_particles 30 --trajlen 24 --gpu_num 0 --agent 'random' --gpu_num 0 > training_results0.out &
+
+
+Mar 1st 2020
+-------------
+train_dataset_size = 400
+valid_dataset_size = 40
+obstacle_map
+nohup python train.py --pfnet_load './checkpoint_90_0.289/pfnet_checkpoint' --trainfiles './data/train/*.tfrecord' --testfiles './data/train/*.tfrecord' --batch_size 4 --learningrate 0.0001 --epochs 100 --num_particles 30 --trajlen 24 --gpu_num 1 > training_results0.out &
+
+
+Mar 2nd 2020
+-------------
+obstacle_map
+num_test_batches = 2
+nohup python display_results.py --pfnet_load './checkpoint_90_0.289/pfnet_checkpoint' --testfiles './data/test/*.tfrecord' --batch_size 1 --epochs 1 --seed 98 --num_particles 500 --trajlen 50 --resample 'true' --alpha_resample_ratio 1.0 --transition_std '2' '0.0872665' --init_particles_distr 'gaussian' --gpu_num 1 > display_results0.out &
+
+
+Mar 3rd 2021
+------------
+1. increase the testing data trajlen to see if the model collapse
+2. take the mode instead of mean for evaluation
+3. rl agent only for localization task input: rgb + fixed num particles & weights -> with guassian distr

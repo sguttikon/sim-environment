@@ -137,7 +137,7 @@ class CustomCNN(BaseFeaturesExtractor):
 
         return torch.cat([robot_state, obs_featues], axis=-1)
 
-def train_action_sampler(device):
+def train_action_sampler(device, timesteps):
 
     # create gym env
     config_filename = os.path.join('./configs/', 'turtlebot_navigate.yaml')
@@ -154,7 +154,7 @@ def train_action_sampler(device):
     net_arch=[256, 256],
     )
     model = PPO("CnnPolicy", env, policy_kwargs=policy_kwargs, verbose=1, device=device)
-    model.learn(total_timesteps=50000)
+    model.learn(total_timesteps=timesteps)
     model.save("ppo_navigate_agent")
 
     del model # remove to demonstrate saving and loading
@@ -199,5 +199,5 @@ def test_action_sampler(device):
     print('testing finished')
 
 if __name__ == '__main__':
-    # train_action_sampler(device=0)
-    test_action_sampler(device=0)
+    train_action_sampler(device=0, timesteps=50000)
+    # test_action_sampler(device=0)
