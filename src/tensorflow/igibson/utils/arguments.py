@@ -37,6 +37,7 @@ def parse_args():
     argparser.add_argument('--batch_size', type=int, default=24, help='Minibatch size for training.')
     argparser.add_argument('--learningrate', type=float, default=0.0025, help='Initial learning rate for training.')
     argparser.add_argument('--epochs', type=int, default=1, help='Number of epochs for training.')
+    argparser.add_argument('--bptt_steps', type=int, default=4, help='Number of backpropagation steps for training with backpropagation through time (BPTT).')
 
     argparser.add_argument('--pfnet_load', type=str, default='', help='Load a previously trained pfnet model from a checkpoint file.')
     argparser.add_argument('--action_load', type=str, default='', help='Load a pretrained action sampler model.')
@@ -52,6 +53,7 @@ def parse_args():
     params.transition_std = np.array(params.transition_std, np.float32)
     params.init_particles_std = np.array(params.init_particles_std, np.float32)
 
+    assert params.trajlen % params.bptt_steps == 0
     assert params.init_particles_distr in ['gaussian', 'uniform']
     assert params.agent in ['manual', 'pretrained', 'random']
     assert params.mode in ['headless', 'gui']
