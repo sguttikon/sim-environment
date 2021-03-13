@@ -103,9 +103,6 @@ class CustomCNN(BaseFeaturesExtractor):
         ]
         self.block3 = nn.ModuleList(block3_layers)
 
-        # to determine device dynamically
-        self.dummy_param = nn.Parameter(torch.empty(0))
-
     def get_obs_features(self, observation):
         x = observation
 
