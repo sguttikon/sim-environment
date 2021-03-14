@@ -7,6 +7,27 @@ import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 from matplotlib.patches import Wedge
 
+def draw_text(text, bgcolor, plt_ax, text_plt):
+    """
+    Render the text
+    :param str text: text to render
+    :param str bgcolor: backgroundcolor used to render text
+    :param matplotlib.axes.Axes plt_ax: figure sub plot instance
+    :param matplotlib.text.Text text_plt: plot of text
+    :return matplotlib.text.Text: updated plot of text
+    """
+
+    if text_plt is None:
+        # render text with color
+        text_plt = plt_ax.text(0.95, 0.95, text, backgroundcolor=bgcolor,
+                        horizontalalignment='right', verticalalignment='top',
+                        transform=plt_ax.transAxes, fontsize=10)
+    else:
+        # update existing text
+        text_plt.set_text(text)
+
+    return text_plt
+
 def draw_floor_map(floor_map, plt_ax, map_plt):
     """
     Render the scene floor map

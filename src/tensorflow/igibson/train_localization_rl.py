@@ -7,9 +7,12 @@ def set_path(path: str):
     except ValueError:
         sys.path.insert(0, path)
 
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from utils import render, datautils, arguments, pfnet_loss
 from gibson2.utils.assets_utils import get_scene_path
 from gibson2.envs.igibson_env import iGibsonEnv
+import matplotlib.pyplot as plt
+from pathlib import Path
 import tensorflow as tf
 import torch.nn as nn
 from PIL import Image
@@ -29,6 +32,15 @@ class LocalizeGibsonEnv(iGibsonEnv):
     def __init__(self, params):
 
         self.params = params
+
+        # create pf model
+        self.pfnet_model = pfnet.pfnet_model(self.params)
+
+        # load model from checkpoint file
+        if self.params.pfnet_load:
+            self.pfnet_model.load_weights(self.params.pfnet_load)
+            print("=====> Loaded pf model from " + params.pfnet_load)
+
         super(LocalizeGibsonEnv, self).__init__(config_file=self.params.config_filename,
                         scene_id=None,
                         mode=self.params.mode,
@@ -45,13 +57,27 @@ class LocalizeGibsonEnv(iGibsonEnv):
                 shape=(output_size, ),
                 dtype=np.float32)
 
-        # create pf model
-        self.pfnet_model = pfnet.pfnet_model(self.params)
+        print("=====> iGibsonEnv initialized")
 
-        # load model from checkpoint file
-        if self.params.pfnet_load:
-            print("=====> Loading pf model from " + self.params.pfnet_load)
-            self.pfnet_model.load_weights(self.params.pfnet_load)
+        if self.params.show_plot:
+            # code related to displaying results in matplotlib
+            self.fig = plt.figure(figsize=(7, 7))
+            self.plt_ax = None
+            self.env_plts = {
+                'map_plt': None,
+                'robot_gt_plt': {
+                    'position_plt': None,
+                    'heading_plt': None,
+                },
+                'step_txt_plt': None,
+            }
+
+            #HACK FigureCanvasAgg and ion is not working together
+            if self.params.store_plot:
+                self.canvas = FigureCanvasAgg(self.fig)
+            else:
+                plt.ion()
+                plt.show()
 
     def load_miscellaneous_variables(self):
         """
@@ -62,8 +88,9 @@ class LocalizeGibsonEnv(iGibsonEnv):
         self.obstacle_map = None
         self.pfnet_state = None
         self.floor_map = None
-        self.old_pose = None
-        self.old_obs = None
+        self.robot_obs = None
+        self.robot_pose = None
+        self.plt_images = []
 
     def reset_variables(self):
         """
@@ -74,74 +101,104 @@ class LocalizeGibsonEnv(iGibsonEnv):
         self.obstacle_map = None
         self.pfnet_state = None
         self.floor_map = None
-        self.old_pose = None
-        self.old_obs = None
+        self.robot_obs = None
+        self.robot_pose = None
+        self.plt_images = []
 
     def step(self, action):
-        state, reward, done, info = super(LocalizeGibsonEnv, self).step(action)
-
         trajlen = 1
         batch_size = 1
+        num_particles = self.params.num_particles
 
-        # process image for training
+        old_obs = self.robot_obs
+        floor_map = self.floor_map[0]
+        old_pfnet_state = self.pfnet_state
+        old_pose = self.robot_pose[0].numpy()
+
+        # perform env step
+        state, reward, done, info = super(LocalizeGibsonEnv, self).step(action)
+
+        # process new env observation
         rgb = datautils.process_raw_image(state['rgb'])
 
-        floor_map = self.floor_map[0]
+        # process new robot state
         robot_state = self.robots[0].calc_state()
-        true_pose = self.get_robot_pose(robot_state, floor_map.shape)
+        new_pose = self.get_robot_pose(robot_state, floor_map.shape)
 
         # calculate actual odometry b/w old pose and new pose
-        old_pose = self.old_pose[0].numpy()
-        odom = datautils.calc_odometry(old_pose, true_pose)
+        assert list(old_pose.shape) == [3] and list(new_pose.shape) == [3]
+        odom = datautils.calc_odometry(old_pose, new_pose)
 
-        obs = tf.expand_dims(
+        new_obs = tf.expand_dims(
                     tf.convert_to_tensor(rgb, dtype=tf.float32)
                     , axis=0)
         odom = tf.expand_dims(
                     tf.convert_to_tensor(odom, dtype=tf.float32)
                     , axis=0)
-        true_pose = tf.expand_dims(
-                        tf.convert_to_tensor(true_pose, dtype=tf.float32)
+        new_pose = tf.expand_dims(
+                        tf.convert_to_tensor(new_pose, dtype=tf.float32)
                         , axis=0)
+
+        odometry = tf.expand_dims(odom, axis=1)
+        observation = tf.expand_dims(old_obs, axis=1)
+
+        # sanity check
+        assert list(odometry.shape) == [batch_size, trajlen, 3]
+        assert list(observation.shape) == [batch_size, trajlen, 56, 56, 3]
+        assert list(old_pfnet_state[0].shape) == [batch_size, num_particles, 3]
+        assert list(old_pfnet_state[1].shape) == [batch_size, num_particles]
+
+        input = [observation, odometry]
+        model_input = (input, old_pfnet_state)
 
         # if stateful: reset RNN s.t. initial_state is set to initial particles and weights
         # if non-stateful: pass the state explicity every step
         if self.params.stateful:
-            self.pfnet_model.layers[-1].reset_states(state)    # RNN layer
-
-        observation = tf.expand_dims(obs, axis=1)
-        odometry = tf.expand_dims(odom, axis=1)
-        # sanity check
-        assert list(odometry.shape) == [batch_size, trajlen, 3]
-        assert list(observation.shape) == [batch_size, trajlen, 56, 56, 3]
-
-        input = [observation, odometry]
-        model_input = (input, self.pfnet_state)
+            self.pfnet_model.layers[-1].reset_states(old_pfnet_state)    # RNN layer
 
         # forward pass
-        output, state = self.pfnet_model(model_input, training=False)
+        output, new_pfnet_state = self.pfnet_model(model_input, training=False)
 
-        self.pfnet_state = state
-        self.old_pose = true_pose
-        self.old_obs = obs
+        self.pfnet_state = new_pfnet_state
+        self.robot_pose = new_pose
+        self.robot_obs = new_obs
 
         custom_state = np.concatenate([robot_state, np.reshape(rgb, [-1])], 0)
         return custom_state, reward, done, info
 
     def reset(self):
-        state = super(LocalizeGibsonEnv, self).reset()
-
         batch_size = 1
-        map_size = params.global_map_size
+        map_size = self.params.global_map_size
         num_particles = self.params.num_particles
         particles_cov = self.params.init_particles_cov
         particles_distr = self.params.init_particles_distr
 
-        # process image for training
+        if self.params.show_plot:
+            #clear subplots
+            plt.clf()
+            self.plt_ax = self.fig.add_subplot(111)
+            self.env_plts = {
+                'map_plt': None,
+                'robot_gt_plt': {
+                    'position_plt': None,
+                    'heading_plt': None,
+                },
+                'step_txt_plt': None,
+            }
+
+            self.store_results()
+
+        # perform env reset
+        state = super(LocalizeGibsonEnv, self).reset()
+
+        # process new env observation
         rgb = datautils.process_raw_image(state['rgb'])
 
+        # process new env map
         floor_map = self.get_floor_map()
         obstacle_map = self.get_obstacle_map()
+
+        # process new robot state
         robot_state = self.robots[0].calc_state()
         true_pose = self.get_robot_pose(robot_state, floor_map.shape)
 
@@ -181,8 +238,8 @@ class LocalizeGibsonEnv(iGibsonEnv):
         self.pfnet_state = [init_particles, init_particle_weights, obstacle_map]
         self.obstacle_map = obstacle_map
         self.floor_map = floor_map
-        self.old_pose = true_pose
-        self.old_obs = obs
+        self.robot_pose = true_pose
+        self.robot_obs = obs
 
         custom_state = np.concatenate([robot_state, np.reshape(rgb, [-1])], 0)
         return custom_state
@@ -315,6 +372,78 @@ class LocalizeGibsonEnv(iGibsonEnv):
 
         return rmin, rmax, cmin, cmax
 
+    def render(self, mode='human'):
+        """
+        Render plots
+        """
+        # super(LocalizeGibsonEnv, self).render(mode)
+
+        if self.params.show_plot:
+            # environment map
+            floor_map = self.floor_map[0].numpy()
+            map_plt = self.env_plts['map_plt']
+            map_plt = render.draw_floor_map(floor_map, self.plt_ax, map_plt)
+            self.env_plts['map_plt'] = map_plt
+
+            # ground truth robot pose and heading
+            color = '#7B241C'
+            robot_pose = self.robot_pose[0].numpy()
+            position_plt = self.env_plts['robot_gt_plt']['position_plt']
+            heading_plt = self.env_plts['robot_gt_plt']['heading_plt']
+            position_plt, heading_plt = render.draw_robot_pose(
+                                robot_pose,
+                                color,
+                                floor_map.shape,
+                                self.plt_ax,
+                                position_plt,
+                                heading_plt)
+            self.env_plts['robot_gt_plt']['position_plt'] = position_plt
+            self.env_plts['robot_gt_plt']['heading_plt'] = heading_plt
+
+            step_txt_plt = self.env_plts['step_txt_plt']
+            step_txt_plt = render.draw_text(
+                        f'episode: {self.current_episode}, step: {self.current_step}',
+                        '#7B241C', self.plt_ax, step_txt_plt)
+            self.env_plts['step_txt_plt'] = step_txt_plt
+
+            if self.params.store_plot:
+                self.canvas.draw()
+                plt_img = np.array(self.canvas.renderer._renderer)
+                plt_img = cv2.cvtColor(plt_img, cv2.COLOR_RGB2BGR)
+                self.plt_images.append(plt_img)
+            else:
+                plt.draw()
+                plt.pause(0.00000000001)
+
+    def close(self):
+        """
+        environment close()
+        """
+        super(LocalizeGibsonEnv, self).close()
+
+        if self.params.show_plot:
+            if self.params.store_plot:
+                self.store_results()
+            else:
+                # to prevent plot from closing after environment is closed
+                plt.ioff()
+                plt.show()
+
+        print("=====> iGibsonEnv closed")
+
+    def store_results(self):
+        if len(self.plt_images) > 0:
+            fps = 30
+            frameSize = (self.plt_images[0].shape[0], self.plt_images[0].shape[1])
+            out = cv2.VideoWriter(
+                    self.params.out_folder + f'episode_run_{self.current_episode}.avi',
+                    cv2.VideoWriter_fourcc(*'XVID'),
+                    fps, frameSize)
+
+            for img in self.plt_images:
+                out.write(img)
+            out.release()
+
 def train_localization_rl(params):
     """
     train rl agent for localization in iGibsonEnv with the parsed arguments
@@ -326,16 +455,28 @@ def train_localization_rl(params):
     env.seed(params.seed)
     env.action_space.np_random.seed(params.seed)
 
-    for _ in range(params.trajlen-1):
-        if params.agent == 'manual':
-            action = datautils.get_discrete_action()
-        else:
-            # default random action
-            action = env.action_space.sample()
+    episodes = 2
+    for _ in range(episodes):
+        env.reset()
+        env.render()
+        for _ in range(params.trajlen-1):
+            if params.agent == 'manual':
+                action = datautils.get_discrete_action()
+            else:
+                # default random action
+                action = env.action_space.sample()
 
-        # take action and get new observation
-        obs, reward, done, _ = env.step(action)
+            # take action and get new observation
+            obs, reward, done, _ = env.step(action)
+            env.render()
+    env.close()
 
 if __name__ == '__main__':
     params = arguments.parse_args()
+
+    params.show_plot = True
+    params.store_plot = False
+    params.out_folder = './episode_runs/'
+    Path(params.out_folder).mkdir(parents=True, exist_ok=True)
+
     train_localization_rl(params)
