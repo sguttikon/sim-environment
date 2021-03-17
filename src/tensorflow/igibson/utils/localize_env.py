@@ -22,6 +22,7 @@ import os
 
 # set programatically the path to 'pfnet' directory (alternately can also set PYTHONPATH)
 set_path('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src/tensorflow/pfnet')
+# set_path('/home/guttikon/awesome_robotics/sim-environment/src/tensorflow/pfnet')
 import pfnet
 
 class LocalizeGibsonEnv(iGibsonEnv):
@@ -59,7 +60,7 @@ class LocalizeGibsonEnv(iGibsonEnv):
 
         print("=====> iGibsonEnv initialized")
 
-        if self.params.show_plot:
+        if self.params.use_plot:
             # code related to displaying results in matplotlib
             self.fig = plt.figure(figsize=(7, 7))
             self.plt_ax = None
@@ -192,7 +193,7 @@ class LocalizeGibsonEnv(iGibsonEnv):
         particles_cov = self.params.init_particles_cov
         particles_distr = self.params.init_particles_distr
 
-        if self.params.show_plot:
+        if self.params.use_plot:
             #clear subplots
             plt.clf()
             self.plt_ax = self.fig.add_subplot(111)
@@ -363,7 +364,7 @@ class LocalizeGibsonEnv(iGibsonEnv):
 
                 # get bounding box for more efficient sampling
                 # rmin, rmax, cmin, cmax = self.bounding_box(self.floor_map)
-                rmin, rmax, cmin, cmax = self.bounding_box(scene_map, robot_pose[b_idx])
+                rmin, rmax, cmin, cmax = self.bounding_box(scene_map, robot_pose[b_idx], lmt=100)
 
                 while sample_i < num_particles:
                     particle = np.random.uniform(low=(cmin, rmin, 0.0), high=(cmax, rmax, 2.0*np.pi), size=(3, ))
@@ -418,7 +419,7 @@ class LocalizeGibsonEnv(iGibsonEnv):
         """
         # super(LocalizeGibsonEnv, self).render(mode)
 
-        if self.params.show_plot:
+        if self.params.use_plot:
             # environment map
             floor_map = self.floor_map[0].numpy()
             map_plt = self.env_plts['map_plt']
@@ -493,7 +494,7 @@ class LocalizeGibsonEnv(iGibsonEnv):
         """
         super(LocalizeGibsonEnv, self).close()
 
-        if self.params.show_plot:
+        if self.params.use_plot:
             if self.params.store_plot:
                 self.store_results()
             else:

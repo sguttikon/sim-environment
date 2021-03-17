@@ -16,12 +16,12 @@ object_randomization_freq: null
 # robot
 robot: Turtlebot
 is_discrete: true
-velocity: 2.0
+velocity: 1.0
 
 # task
 task: point_nav_random
 target_dist_min: 1.0
-target_dist_max: 10.0
+target_dist_max: 4.0
 goal_format: polar
 task_obs_dim: 4
 

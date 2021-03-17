@@ -1,67 +1,14 @@
 #!/usr/bin/env python3
 
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
-from gibson2.envs.igibson_env import iGibsonEnv
+from utils.navigate_env import NavigateGibsonEnv
 from stable_baselines3 import PPO
-from utils import datautils
 import tensorflow as tf
 import torch.nn as nn
 import numpy as np
 import torch
 import gym
 import os
-
-class NavigateGibsonEnv(iGibsonEnv):
-
-    def __init__(
-        self,
-        config_file,
-        scene_id=None,
-        mode='headless',
-        action_timestep=1 / 10.0,
-        physics_timestep=1 / 240.0,
-        device_idx=0,
-        render_to_tensor=False,
-        automatic_reset=False,
-    ):
-
-        super(NavigateGibsonEnv, self).__init__(config_file=config_file,
-                        scene_id=scene_id,
-                        mode=mode,
-                        action_timestep=action_timestep,
-                        physics_timestep=physics_timestep,
-                        device_idx=device_idx,
-                        render_to_tensor=render_to_tensor,
-                        automatic_reset=automatic_reset)
-
-        output_size = 18 + np.prod((56, 56, 3))
-
-        self.observation_space = gym.spaces.Box(
-                low=-np.inf, high=np.inf,
-                shape=(output_size, ),
-                dtype=np.float32)
-
-    def step(self, action):
-        state, reward, done, info = super(NavigateGibsonEnv, self).step(action)
-
-        # process image for training
-        rgb = datautils.process_raw_image(state['rgb'])
-
-        custom_state = np.concatenate([self.robots[0].calc_state(),
-                            np.reshape(rgb, [-1])], 0)
-
-        return custom_state, reward, done, info
-
-    def reset(self):
-        state = super(NavigateGibsonEnv, self).reset()
-
-        # process image for training
-        rgb = datautils.process_raw_image(state['rgb'])
-
-        custom_state = np.concatenate([self.robots[0].calc_state(),
-                            np.reshape(rgb, [-1])], 0)
-
-        return custom_state
 
 class CustomCNN(BaseFeaturesExtractor):
     """
@@ -137,7 +84,7 @@ class CustomCNN(BaseFeaturesExtractor):
 def train_action_sampler(device, timesteps):
 
     # create gym env
-    config_filename = os.path.join('./configs/', 'turtlebot_navigate.yaml')
+    config_filename = os.path.join('./configs/', 'turtlebot_demo.yaml')
     env = NavigateGibsonEnv(config_file=config_filename, mode='headless')
     state = env.reset()
 
@@ -167,7 +114,7 @@ def test_action_sampler(device):
     tf.random.set_seed(seed)
 
     # create gym env
-    config_filename = os.path.join('./configs/', 'turtlebot_navigate.yaml')
+    config_filename = os.path.join('./configs/', 'turtlebot_demo.yaml')
     env = NavigateGibsonEnv(config_file=config_filename, mode='gui')
 
     # Test the agent
@@ -196,5 +143,5 @@ def test_action_sampler(device):
     print('testing finished')
 
 if __name__ == '__main__':
-    train_action_sampler(device=0, timesteps=50000)
-    # test_action_sampler(device=0)
+    # train_action_sampler(device=0, timesteps=2048)
+    test_action_sampler(device=0)

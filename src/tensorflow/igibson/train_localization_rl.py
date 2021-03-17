@@ -136,7 +136,7 @@ def test_action_sampler(params):
         # new episode
         custom_state = env.reset()
         env.render()
-        for _ in range(params.trajlen-1):
+        for _ in range(params.trajlen):
             # get action
             if params.agent == 'manual':
                 action = datautils.get_discrete_action()
@@ -160,7 +160,7 @@ if __name__ == '__main__':
     params.timesteps = 2048
     params.rl_agent = './ppo_localize_agent'
 
-    params.show_plot = False
+    params.use_plot = False
     params.store_plot = False
     params.out_folder = './episode_runs/'
     Path(params.out_folder).mkdir(parents=True, exist_ok=True)
