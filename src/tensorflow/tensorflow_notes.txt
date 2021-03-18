@@ -180,3 +180,13 @@ Mar 3rd 2021
 1. increase the testing data trajlen to see if the model collapse
 2. take the mode instead of mean for evaluation
 3. rl agent only for localization task input: rgb + fixed num particles & weights -> with guassian distr
+
+
+Mar 17th 2021
+-------------
+1. baseline agent for igibson navigation task ->
+  read the paper
+  start with fixed start and end
+  with only robot state
+  use MlpPolicy for RL agent
+2. log the loss of train rl agent
