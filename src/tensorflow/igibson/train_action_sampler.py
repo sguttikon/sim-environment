@@ -99,7 +99,7 @@ def train_action_sampler(device, timesteps):
     )
     model = PPO("CnnPolicy", env, policy_kwargs=policy_kwargs, verbose=1, device=device)
     model.learn(total_timesteps=timesteps)
-    model.save("ppo_navigate_agent")
+    model.save("./ppo_navigate_agent")
 
     del model # remove to demonstrate saving and loading
     env.close()
@@ -127,7 +127,7 @@ def test_action_sampler(device):
     net_arch=[256, 256],
     )
     model = PPO("CnnPolicy", env, policy_kwargs=policy_kwargs, verbose=1, device=device)
-    model = PPO.load('ppo_navigate_agent')
+    model = PPO.load('./ppo_navigate_agent')
 
     for _ in range(5):
         obs = env.reset()
