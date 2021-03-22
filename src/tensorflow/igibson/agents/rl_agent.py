@@ -313,6 +313,7 @@ def parse_args():
     argparser.add_argument('--eval_interval', type=int, default=1e4)
     argparser.add_argument('--policy_save_interval', type=int, default=5e3)
     argparser.add_argument('--seed', type=int, default='42', help='Fix the random seed of numpy and tensorflow.')
+    argparser.add_argument('--gpu_num', type=int, default='0', help='use gpu no. to train')
 
     params = argparser.parse_args()
 
@@ -324,6 +325,19 @@ def parse_args():
     tf.random.set_seed(params.seed)
 
     params.rootdir = './runs/' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    assert params.gpu_num < len(gpus)
+    if gpus:
+        # restrict TF to only use the first GPU
+        try:
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+            tf.config.experimental.set_visible_devices(gpus[params.gpu_num], 'GPU')
+            logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+        except RuntimeError as e:
+            # visible devices must be set before GPUs have been initialized
+            print(e)
 
     return params
 
