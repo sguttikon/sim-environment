@@ -9,23 +9,18 @@ import datetime
 import collections
 import numpy as np
 from tqdm import tqdm
+from agents import SACAgent
 import matplotlib.pyplot as plt
 from gibson2.envs.igibson_env import iGibsonEnv
 
 import tensorflow as tf
-from tensorflow.python.framework.tensor_spec import BoundedTensorSpec
-from tensorflow.python.framework.tensor_spec import TensorSpec
-from tf_agents.agents.ddpg import critic_network
-from tf_agents.agents.sac import sac_agent
 from tf_agents.agents.sac import tanh_normal_projection_network
 from tf_agents.environments import gym_wrapper
 from tf_agents.environments import py_environment
 from tf_agents.environments import tf_py_environment
 from tf_agents.metrics import py_metrics
-from tf_agents.networks import actor_distribution_network
-from tf_agents.networks import normal_projection_network
 from tf_agents.networks.utils import mlp_layers
-from tf_agents.policies import py_tf_eager_policy
+from tf_agents.policies import policy_saver
 from tf_agents.policies import random_py_policy
 from tf_agents.replay_buffers import reverb_replay_buffer
 from tf_agents.replay_buffers import reverb_utils
@@ -33,8 +28,6 @@ from tf_agents.train import actor
 from tf_agents.train import learner
 from tf_agents.train import triggers
 from tf_agents.train.utils import spec_utils
-from tf_agents.train.utils import train_utils
-from tf_agents.trajectories.time_step import TimeStep
 
 import sys
 def set_path(path: str):
@@ -115,7 +108,8 @@ def train_sac(params):
                     config_file=config_filename,
                     mode='headless',
                     action_timestep=1.0 / 120.0,
-                    physics_timestep=1.0 / 120.0)
+                    physics_timestep=1.0 / 120.0
+    )
     # eval_env = NavigateGibsonEnv(
     #                 config_file=config_filename,
     #                 mode='headless',
@@ -123,96 +117,14 @@ def train_sac(params):
     #                 physics_timestep=1.0 / 120.0)
 
     # wrap iGibsonEnv to PyEnvironment
-    collect_env = gym_wrapper.GymWrapper(collect_env)
-    eval_env = collect_env # gym_wrapper.GymWrapper(eval_env)
-    assert isinstance(collect_env, py_environment.PyEnvironment)
-    assert isinstance(eval_env, py_environment.PyEnvironment)
+    collect_py_env = gym_wrapper.GymWrapper(collect_env)
+    eval_py_env = collect_py_env # gym_wrapper.GymWrapper(eval_env)
+    assert isinstance(collect_py_env, py_environment.PyEnvironment)
+    assert isinstance(eval_py_env, py_environment.PyEnvironment)
 
-    # strategy = strategy_utils.get_strategy(tpu=False, use_gpu=True)
-
-    time_step_spec = TimeStep(
-        TensorSpec(
-            shape=(),
-            dtype=tf.int32,
-            name='step_type'
-        ),
-        TensorSpec(
-            shape=(),
-            dtype=tf.float32,
-            name='reward'
-        ),
-        BoundedTensorSpec(
-            shape=(),
-            dtype=tf.float32,
-            name='discount',
-            minimum=np.array(0., dtype=np.float32),
-            maximum=np.array(1., dtype=np.float32)
-        ),
-        BoundedTensorSpec(
-            shape=(IMG_HEIGHT, IMG_WIDTH, 3),
-            dtype=tf.float32,
-            name='observation',
-            minimum=np.array(-1., dtype=np.float32),
-            maximum=np.array(+1., dtype=np.float32)
-        ),
-    )
-    observation_spec = time_step_spec.observation
-    action_spec = BoundedTensorSpec(
-        shape=(2,),
-        dtype=tf.float32,
-        name='action',
-        minimum=np.array(-1., dtype=np.float32),
-        maximum=np.array(+1., dtype=np.float32)
-    )
-
-    actor_fc_layers = (256, 256)
-    critic_joint_fc_layers = (256, 256)
-
-    # Critic Network to estimate Q(s, a)
-    critic_net = critic_network.CriticNetwork(
-        input_tensor_spec=(observation_spec, action_spec),
-        observation_fc_layer_params=None,
-        action_fc_layer_params=None,
-        joint_fc_layer_params=critic_joint_fc_layers,
-        kernel_initializer='glorot_uniform',
-        last_kernel_initializer='glorot_uniform'
-    )
-
-    actor_net = actor_distribution_network.ActorDistributionNetwork(
-        input_tensor_spec=observation_spec,
-        output_tensor_spec=action_spec,
-        fc_layer_params=actor_fc_layers,
-        continuous_projection_net=(
-            tanh_normal_projection_network.TanhNormalProjectionNetwork
-        ),
-    )
-
-    # SAC Agent
-    train_step = train_utils.create_train_step()
-
-    tf_agent = sac_agent.SacAgent(
-        time_step_spec=time_step_spec,
-        action_spec=action_spec,
-        critic_network=critic_net,
-        actor_network=actor_net,
-        actor_optimizer=tf.compat.v1.train.AdamOptimizer(
-            learning_rate=params.actor_learning_rate
-        ),
-        critic_optimizer=tf.compat.v1.train.AdamOptimizer(
-            learning_rate=params.critic_learning_rate
-        ),
-        alpha_optimizer=tf.compat.v1.train.AdamOptimizer(
-            learning_rate=params.alpha_learning_rate
-        ),
-        target_update_tau=params.target_update_tau,
-        target_update_period=params.target_update_period,
-        td_errors_loss_fn=tf.math.squared_difference,
-        gamma=params.gamma,
-        reward_scale_factor=params.reward_scale_factor,
-        train_step_counter=train_step,
-    )
-
-    tf_agent.initialize()
+    sac = SACAgent()
+    tf_agent = sac.tf_agent
+    train_step = sac.train_step
 
     # Replay Buffer
     table_name = 'uniform_table'
@@ -239,17 +151,13 @@ def train_sac(params):
     experience_dataset_fn = lambda: dataset
 
     # Policies
-    eval_policy = py_tf_eager_policy.PyTFEagerPolicy(
-            policy=tf_agent.policy,
-            use_tf_function=True
-    )
-    collect_policy = py_tf_eager_policy.PyTFEagerPolicy(
-            policy=tf_agent.collect_policy,
-            use_tf_function=True
-    )
+    eval_policy = sac.eval_policy
+    collect_policy = sac.collect_policy
     random_policy = random_py_policy.RandomPyPolicy(
-            time_step_spec=collect_env.time_step_spec(),
-            action_spec=collect_env.action_spec())
+            time_step_spec=collect_py_env.time_step_spec(),
+            action_spec=collect_py_env.action_spec()
+    )
+    tf_policy_saver = policy_saver.PolicySaver(sac.tf_agent.policy)
 
     # Actor
     # trajectories as [t0, t1, t2, t3], [t1, t2, t3, t4], ....
@@ -257,11 +165,12 @@ def train_sac(params):
                     py_client=reverb_replay.py_client,
                     table_name=table_name,
                     sequence_length=params.sequence_length,
-                    stride_length=1)
+                    stride_length=1
+    )
 
     # use random policy to collect experiences to seed replay buffer
     initial_collect_actor = actor.Actor(
-        env=collect_env,
+        env=collect_py_env,
         policy=random_policy,
         train_step=train_step,
         steps_per_run=params.initial_collect_steps,
@@ -272,21 +181,23 @@ def train_sac(params):
     # collect actor for training
     env_step_metric = py_metrics.EnvironmentSteps()
     collect_actor = actor.Actor(
-                        env=collect_env,
+                        env=collect_py_env,
                         policy=collect_policy,
                         train_step=train_step,
                         steps_per_run=1,
                         metrics=actor.collect_metrics(10),
                         summary_dir=os.path.join(params.rootdir, learner.TRAIN_DIR),
-                        observers=[rb_observer, env_step_metric])
+                        observers=[rb_observer, env_step_metric]
+    )
 
     # eval actor to evaluate the policy during training
-    eval_actor = actor.Actor(env=eval_env,
+    eval_actor = actor.Actor(env=eval_py_env,
                         policy=eval_policy,
                         train_step=train_step,
                         episodes_per_run=params.num_eval_episodes,
                         metrics=actor.eval_metrics(params.num_eval_episodes),
-                        summary_dir=os.path.join(params.rootdir, 'eval'))
+                        summary_dir=os.path.join(params.rootdir, 'eval')
+    )
 
     # Learner performs gradient step updates using experience data from replay buffer
     saved_model_dir = os.path.join(params.rootdir, learner.POLICY_SAVED_MODEL_DIR)
@@ -307,7 +218,8 @@ def train_sac(params):
                         train_step=train_step,
                         agent=tf_agent,
                         experience_dataset_fn=experience_dataset_fn,
-                        triggers=learning_triggers)
+                        triggers=learning_triggers
+    )
 
     # train SAC agent
     tf_agent.train_step_counter.assign(0)
@@ -334,14 +246,41 @@ def train_sac(params):
     rb_observer.close()
     reverb_server.stop()
 
+    policy_dir = os.path.join(params.rootdir, 'output')
+    tf_policy_saver.save(policy_dir)
+
     steps = range(0, params.num_iterations + 1, params.eval_interval)
     plt.plot(steps, returns)
     plt.ylabel('Average Return')
     plt.xlabel('Step')
     plt.ylim()
-    plt.savefig(params.rootdir + '/average_return.png')
+    plt.savefig(policy_dir + '/average_return.png')
 
     print('training finished')
+
+def test_sac(params):
+
+    # wrap iGibsonEnv to PyEnvironment
+    config_filename = os.path.join('../configs/', 'turtlebot_navigate.yaml')
+    eval_env = NavigateGibsonEnv(
+                    config_file=config_filename,
+                    mode='headless',
+                    action_timestep=1.0 / 120.0,
+                    physics_timestep=1.0 / 120.0
+    )
+    eval_py_env = gym_wrapper.GymWrapper(eval_env)
+    assert isinstance(eval_py_env, py_environment.PyEnvironment)
+    eval_tf_env = tf_py_environment.TFPyEnvironment(eval_py_env)
+
+    policy_dir = './runs/20210322-162208/output'
+    saved_policy = tf.compat.v2.saved_model.load(policy_dir)
+
+    num_episodes = 3
+    for _ in range(num_episodes):
+        time_step = eval_tf_env.reset()
+        while not time_step.is_last():
+            action_step = saved_policy.action(time_step)
+            time_step = eval_tf_env.step(action_step.action)
 
 def parse_args():
     """
@@ -392,3 +331,5 @@ if __name__ == '__main__':
     params = parse_args()
 
     train_sac(params)
+
+    # test_sac(params)

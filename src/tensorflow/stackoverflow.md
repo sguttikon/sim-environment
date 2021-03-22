@@ -8,6 +8,11 @@ export PATH=/home/guttikon/toolkit/bin/:$PATH
 export LD_LIBRARY_PATH=/home/guttikon/toolkit/lib64
 ```
 
+##### Note: To fix libpython3.8.so.1.0 error during import reverb #####
+```
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/guttikon/miniconda3/envs/igibson/lib/
+```
+
 ##### Note: To fix libcusolver.so.10 error #####
 ```
 cd $LD_LIBRARY_PATH
