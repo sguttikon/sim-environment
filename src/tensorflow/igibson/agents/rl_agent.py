@@ -43,6 +43,7 @@ def set_path(path: str):
     except ValueError:
         sys.path.insert(0, path)
 set_path('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src/tensorflow/igibson')
+# set_path('/home/guttikon/awesome_robotics/sim-environment/src/tensorflow/igibson')
 from utils import datautils
 
 IMG_WIDTH = 56
@@ -217,7 +218,7 @@ def train_sac(params):
     table_name = 'uniform_table'
     table = reverb.Table(
         name=table_name,
-        max_size=int(params.replay_buffer_capacity),
+        max_size=params.replay_buffer_capacity,
         sampler=reverb.selectors.Uniform(),
         remover=reverb.selectors.Fifo(),
         rate_limiter=reverb.rate_limiters.MinSize(1),
@@ -338,18 +339,7 @@ def train_sac(params):
     plt.ylabel('Average Return')
     plt.xlabel('Step')
     plt.ylim()
-    plt.savefig('./average_return.png')
-
-    num_episodes = 3
-    video_filename = './sac_navigate.mp4'
-    with imageio.get_writer(video_filename, fps=60) as video:
-      for _ in range(num_episodes):
-        time_step = eval_env.reset()
-        video.append_data(eval_env.render())
-        while not time_step.is_last():
-          action_step = eval_actor.policy.action(time_step)
-          time_step = eval_env.step(action_step.action)
-          video.append_data(eval_env.render())
+    plt.savefig(params.rootdir + '/average_return.png')
 
     print('training finished')
 
@@ -383,8 +373,16 @@ def parse_args():
     argparser.add_argument('--num_eval_episodes', type=int, default=20)
     argparser.add_argument('--eval_interval', type=int, default=1e4)
     argparser.add_argument('--policy_save_interval', type=int, default=5e3)
+    argparser.add_argument('--seed', type=int, default='42', help='Fix the random seed of numpy and tensorflow.')
 
     params = argparser.parse_args()
+
+    params.num_iterations = int(params.num_iterations)
+    params.replay_buffer_capacity = int(params.replay_buffer_capacity)
+
+    # fix seed
+    np.random.seed(params.seed)
+    tf.random.set_seed(params.seed)
 
     params.rootdir = './runs/' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
 
