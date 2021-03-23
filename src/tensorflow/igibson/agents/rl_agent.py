@@ -169,6 +169,7 @@ def train_sac(params):
     )
 
     # use random policy to collect experiences to seed replay buffer
+    print('collecting random policy experiences')
     initial_collect_actor = actor.Actor(
         env=collect_py_env,
         policy=random_policy,
@@ -227,6 +228,7 @@ def train_sac(params):
     avg_return = get_eval_metrics(eval_actor)['AverageReturn']
     returns = [avg_return]
 
+    print('training started')
     for _ in tqdm(range(params.num_iterations)):
         # train
         collect_actor.run()
@@ -318,6 +320,7 @@ def parse_args():
     params = argparser.parse_args()
 
     params.num_iterations = int(params.num_iterations)
+    params.eval_interval = int(params.eval_interval)
     params.replay_buffer_capacity = int(params.replay_buffer_capacity)
 
     # fix seed

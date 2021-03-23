@@ -10,6 +10,7 @@ from tf_agents.agents.sac import sac_agent
 from tf_agents.networks import actor_distribution_network
 from tf_agents.networks import normal_projection_network
 from tf_agents.policies import py_tf_eager_policy
+from tf_agents.train.utils import strategy_utils
 from tf_agents.train.utils import train_utils
 from tf_agents.trajectories.time_step import TimeStep
 
@@ -87,54 +88,57 @@ class SACAgent(object):
             maximum=np.array(+1., dtype=np.float32)
         )
 
+        strategy = strategy_utils.get_strategy(tpu=False, use_gpu=True)
+
         # Critic Network to estimate Q(s, a)
-        critic_net = critic_network.CriticNetwork(
-            input_tensor_spec=(observation_spec, action_spec),
-            observation_conv_layer_params=conv_layers,
-            observation_fc_layer_params=critic_obs_fc_layers,
-            action_fc_layer_params=critic_action_fc_layers,
-            joint_fc_layer_params=critic_joint_fc_layers,
-            kernel_initializer='glorot_uniform',
-        )
+        with strategy.scope():
+            critic_net = critic_network.CriticNetwork(
+                input_tensor_spec=(observation_spec, action_spec),
+                observation_conv_layer_params=conv_layers,
+                observation_fc_layer_params=critic_obs_fc_layers,
+                action_fc_layer_params=critic_action_fc_layers,
+                joint_fc_layer_params=critic_joint_fc_layers,
+                kernel_initializer='glorot_uniform',
+            )
 
         # Actor Network to p(a|s) distribution
-        actor_net = actor_distribution_network.ActorDistributionNetwork(
-            input_tensor_spec=observation_spec,
-            output_tensor_spec=action_spec,
-            # preprocessing_layers=None,
-            # preprocessing_combiner=None,
-            conv_layer_params=conv_layers,
-            fc_layer_params=actor_fc_layers,
-            continuous_projection_net=normal_projection_net,
-            kernel_initializer='glorot_uniform',
-        )
+        with strategy.scope():
+            actor_net = actor_distribution_network.ActorDistributionNetwork(
+                input_tensor_spec=observation_spec,
+                output_tensor_spec=action_spec,
+                # preprocessing_layers=None,
+                # preprocessing_combiner=None,
+                conv_layer_params=conv_layers,
+                fc_layer_params=actor_fc_layers,
+                continuous_projection_net=normal_projection_net,
+                kernel_initializer='glorot_uniform',
+            )
 
         # SAC Agent
-        self.train_step = train_utils.create_train_step()
-
-        self.tf_agent = sac_agent.SacAgent(
-            time_step_spec=time_step_spec,
-            action_spec=action_spec,
-            critic_network=critic_net,
-            actor_network=actor_net,
-            actor_optimizer=tf.compat.v1.train.AdamOptimizer(
-                learning_rate=actor_learning_rate
-            ),
-            critic_optimizer=tf.compat.v1.train.AdamOptimizer(
-                learning_rate=critic_learning_rate
-            ),
-            alpha_optimizer=tf.compat.v1.train.AdamOptimizer(
-                learning_rate=alpha_learning_rate
-            ),
-            target_update_tau=target_update_tau,
-            target_update_period=target_update_period,
-            td_errors_loss_fn=td_errors_loss_fn,
-            gamma=gamma,
-            reward_scale_factor=reward_scale_factor,
-            train_step_counter=self.train_step,
-        )
-
-        self.tf_agent.initialize()
+        with strategy.scope():
+            self.train_step = train_utils.create_train_step()
+            self.tf_agent = sac_agent.SacAgent(
+                time_step_spec=time_step_spec,
+                action_spec=action_spec,
+                critic_network=critic_net,
+                actor_network=actor_net,
+                actor_optimizer=tf.compat.v1.train.AdamOptimizer(
+                    learning_rate=actor_learning_rate
+                ),
+                critic_optimizer=tf.compat.v1.train.AdamOptimizer(
+                    learning_rate=critic_learning_rate
+                ),
+                alpha_optimizer=tf.compat.v1.train.AdamOptimizer(
+                    learning_rate=alpha_learning_rate
+                ),
+                target_update_tau=target_update_tau,
+                target_update_period=target_update_period,
+                td_errors_loss_fn=td_errors_loss_fn,
+                gamma=gamma,
+                reward_scale_factor=reward_scale_factor,
+                train_step_counter=self.train_step,
+            )
+            self.tf_agent.initialize()
 
         # Policies
         self.eval_policy = py_tf_eager_policy.PyTFEagerPolicy(
