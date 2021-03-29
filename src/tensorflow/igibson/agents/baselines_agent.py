@@ -10,6 +10,7 @@ import tensorflow as tf
 from pathlib import Path
 from stable_baselines3 import PPO
 from gibson2.envs.igibson_env import iGibsonEnv
+from stable_baselines3.common.evaluation import evaluate_policy
 
 class NavigateGibsonEnv(iGibsonEnv):
 
@@ -36,22 +37,26 @@ class NavigateGibsonEnv(iGibsonEnv):
 
         self.observation_space = gym.spaces.Box(
                 low=-np.inf, high=np.inf,
-                shape=(18, ),
+                shape=(20, ),
                 dtype=np.float32)
 
     def step(self, action):
         state, reward, done, info = super(NavigateGibsonEnv, self).step(action)
 
         proprio_state = self.robots[0].calc_state()
+        task_obs = self.task.get_task_obs(self)
+        custom_state = np.concatenate([task_obs[:-2], proprio_state], 0)
 
-        return proprio_state, reward, done, info
+        return custom_state, reward, done, info
 
     def reset(self):
         state = super(NavigateGibsonEnv, self).reset()
 
         proprio_state = self.robots[0].calc_state()
+        task_obs = self.task.get_task_obs(self)
+        custom_state = np.concatenate([task_obs[:-2], proprio_state], 0)
 
-        return proprio_state
+        return custom_state
 
 def train_action_sampler(params):
 
@@ -71,7 +76,18 @@ def train_action_sampler(params):
                     device_idx=params.gpu_num
     )
 
-    model = PPO('MlpPolicy', env, verbose=1, device=params.gpu_num)
+    policy_kwargs = dict(
+        net_arch=[256, 256],
+    )
+    model = PPO(
+                policy='MlpPolicy',
+                env=env,
+                tensorboard_log=rootdir,
+                policy_kwargs=policy_kwargs,
+                verbose=1,
+                seed=params.seed,
+                device=params.gpu_num,
+    )
     model.learn(total_timesteps=params.num_iterations)
     model.save(rootdir + '/ppo_baselines3_agent')
 
@@ -82,7 +98,7 @@ def train_action_sampler(params):
 
 def test_action_sampler(params):
 
-    rootdir = './runs/20210323-162525'
+    rootdir = './runs/20210324-070926'
 
     # create gym env
     config_filename = os.path.join(
@@ -91,16 +107,29 @@ def test_action_sampler(params):
     )
     env = NavigateGibsonEnv(
                     config_file=config_filename,
-                    mode='gui',
-                    action_timestep=1.0 / 120.0,
-                    physics_timestep=1.0 / 120.0,
+                    mode='headless',
+                    action_timestep=1.0 / 30.0,
+                    physics_timestep=1.0 / 30.0,
                     device_idx=params.gpu_num
     )
 
-    model = PPO('MlpPolicy', env, verbose=1, device=params.gpu_num)
+    policy_kwargs = dict(
+        net_arch=[256, 256],
+    )
+    model = PPO(
+                policy='MlpPolicy',
+                env=env,
+                tensorboard_log=None,
+                policy_kwargs=policy_kwargs,
+                verbose=1,
+                seed=params.seed,
+                device=params.gpu_num)
     model = PPO.load(rootdir + '/ppo_baselines3_agent')
 
-    for _ in range(5):
+    # mean_reward, std_reward = evaluate_policy(model, env)
+    # print(f"Mean reward = {mean_reward:.2f} +/- {std_reward:.2f}")
+
+    for _ in range(1):
         obs = env.reset()
         while True:
             action, _states = model.predict(obs)
@@ -153,6 +182,6 @@ def parse_args():
 if __name__ == '__main__':
     params = parse_args()
 
-    train_action_sampler(params)
+    # train_action_sampler(params)
 
-    # test_action_sampler(params)
+    test_action_sampler(params)

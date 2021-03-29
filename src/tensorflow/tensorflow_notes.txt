@@ -190,3 +190,9 @@ Mar 17th 2021
   with only robot state
   use MlpPolicy for RL agent
 2. log the loss of train rl agent
+
+Mar 24th 2021
+-------------
+1. Eval and Reward during training PPO, try different agents
+2. set squashoutput=True, ent_coef=0.01, discount factor 1.0 and <1.0
+3. cross verify action is with in action_space range
