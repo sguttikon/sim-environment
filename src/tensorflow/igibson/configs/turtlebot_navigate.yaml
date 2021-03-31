@@ -22,6 +22,9 @@ velocity: 2.0
 task: point_nav_fixed
 target_dist_min: 1.0
 target_dist_max: 10.0
+initial_pos: [-1.2, 0.7, 0.0] # [x, y, z]
+initial_orn: [0.0, 0.0, 0.0]
+target_pos: [0.9, -1.5, 0.0] # [x, y, z]
 goal_format: polar
 task_obs_dim: 4
 
@@ -36,8 +39,8 @@ discount_factor: 0.99
 
 # termination condition
 dist_tol: 0.36  # body width
-max_step: 500
-max_collisions_allowed: 500
+max_step: 1000
+max_collisions_allowed: 1000
 
 # misc config
 initial_pos_z_offset: 0.1

@@ -9,7 +9,10 @@ import numpy as np
 import tensorflow as tf
 from pathlib import Path
 from stable_baselines3 import PPO
+from stable_baselines3 import SAC
 from gibson2.envs.igibson_env import iGibsonEnv
+from stable_baselines3.common.callbacks import CallbackList
+from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.evaluation import evaluate_policy
 
 class NavigateGibsonEnv(iGibsonEnv):
@@ -25,7 +28,6 @@ class NavigateGibsonEnv(iGibsonEnv):
         render_to_tensor=False,
         automatic_reset=False,
     ):
-
         super(NavigateGibsonEnv, self).__init__(config_file=config_file,
                         scene_id=scene_id,
                         mode=mode,
@@ -71,25 +73,44 @@ def train_action_sampler(params):
     env = NavigateGibsonEnv(
                     config_file=config_filename,
                     mode='headless',
-                    action_timestep=1.0 / 120.0,
-                    physics_timestep=1.0 / 120.0,
+                    action_timestep=1.0 / 60.0,
+                    physics_timestep=1.0 / 60.0,
                     device_idx=params.gpu_num
     )
 
-    policy_kwargs = dict(
-        net_arch=[256, 256],
+    # Use deterministic actions for evaluation
+    logdir = os.path.join(rootdir, 'logs')
+    savedir = os.path.join(rootdir, 'best_model')
+    eval_callback = EvalCallback(
+                    eval_env=env,
+                    n_eval_episodes=params.n_eval,
+                    eval_freq=params.eval_freq,
+                    log_path=logdir,
+                    best_model_save_path=savedir,
+                    deterministic=True,
+                    render=False,
     )
-    model = PPO(
+
+    # Create the callback list
+    callback_list = CallbackList([eval_callback])
+
+    policy_kwargs = dict(
+        net_arch=[512, 512],
+    )
+    model = SAC(
                 policy='MlpPolicy',
                 env=env,
-                tensorboard_log=rootdir,
+                tensorboard_log=logdir,
                 policy_kwargs=policy_kwargs,
                 verbose=1,
                 seed=params.seed,
                 device=params.gpu_num,
     )
-    model.learn(total_timesteps=params.num_iterations)
-    model.save(rootdir + '/ppo_baselines3_agent')
+    model.learn(
+                total_timesteps=params.n_train,
+                callback=callback_list
+    )
+    # model.save(rootdir + '/ppo_baselines3_agent')
 
     del model # remove to demonstrate saving and loading
     env.close()
@@ -98,7 +119,8 @@ def train_action_sampler(params):
 
 def test_action_sampler(params):
 
-    rootdir = './runs/20210324-070926'
+    rootdir = './runs/20210331-083433'
+    savedir = os.path.join(rootdir, 'best_model')
 
     # create gym env
     config_filename = os.path.join(
@@ -108,15 +130,15 @@ def test_action_sampler(params):
     env = NavigateGibsonEnv(
                     config_file=config_filename,
                     mode='headless',
-                    action_timestep=1.0 / 30.0,
-                    physics_timestep=1.0 / 30.0,
+                    action_timestep=1.0 / 60.0,
+                    physics_timestep=1.0 / 60.0,
                     device_idx=params.gpu_num
     )
 
     policy_kwargs = dict(
-        net_arch=[256, 256],
+        net_arch=[512, 512],
     )
-    model = PPO(
+    model = SAC(
                 policy='MlpPolicy',
                 env=env,
                 tensorboard_log=None,
@@ -124,7 +146,8 @@ def test_action_sampler(params):
                 verbose=1,
                 seed=params.seed,
                 device=params.gpu_num)
-    model = PPO.load(rootdir + '/ppo_baselines3_agent')
+    model = SAC.load(savedir + '/best_model')
+    print('====> loaded pretrained model')
 
     # mean_reward, std_reward = evaluate_policy(model, env)
     # print(f"Mean reward = {mean_reward:.2f} +/- {std_reward:.2f}")
@@ -132,7 +155,7 @@ def test_action_sampler(params):
     for _ in range(1):
         obs = env.reset()
         while True:
-            action, _states = model.predict(obs)
+            action, _states = model.predict(obs, deterministic=True)
             obs, reward, done, info = env.step(action)
             if done:
                 print(reward)
@@ -151,13 +174,17 @@ def parse_args():
 
     argparser = argparse.ArgumentParser()
 
-    argparser.add_argument('--num_iterations', type=int, default=1e6)
+    argparser.add_argument('--n_train', type=int, default=1e6)
+    argparser.add_argument('--n_eval', type=int, default=5)
+    argparser.add_argument('--eval_freq', type=int, default=1e4)
     argparser.add_argument('--seed', type=int, default='42', help='Fix the random seed of numpy and tensorflow.')
     argparser.add_argument('--gpu_num', type=int, default='0', help='use gpu no. to train')
 
     params = argparser.parse_args()
 
-    params.num_iterations = int(params.num_iterations)
+    params.n_train = int(params.n_train)
+    params.n_eval = int(params.n_eval)
+    params.eval_freq = int(params.eval_freq)
 
     # fix seed
     np.random.seed(params.seed)
@@ -182,6 +209,6 @@ def parse_args():
 if __name__ == '__main__':
     params = parse_args()
 
-    # train_action_sampler(params)
+    train_action_sampler(params)
 
-    test_action_sampler(params)
+    # test_action_sampler(params)
