@@ -8,12 +8,25 @@ import datetime
 import numpy as np
 import tensorflow as tf
 from pathlib import Path
+from networks import CustomCNN
 from stable_baselines3 import PPO
 from stable_baselines3 import SAC
 from gibson2.envs.igibson_env import iGibsonEnv
+from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.callbacks import CallbackList
 from stable_baselines3.common.callbacks import EvalCallback
+from stable_baselines3.common.vec_env import VecTransposeImage
 from stable_baselines3.common.evaluation import evaluate_policy
+
+import sys
+def set_path(path: str):
+    try:
+        sys.path.index(path)
+    except ValueError:
+        sys.path.insert(0, path)
+set_path('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src/tensorflow/igibson')
+# set_path('/home/guttikon/awesome_robotics/sim-environment/src/tensorflow/igibson')
+from utils import datautils
 
 class NavigateGibsonEnv(iGibsonEnv):
 
@@ -37,26 +50,46 @@ class NavigateGibsonEnv(iGibsonEnv):
                         render_to_tensor=render_to_tensor,
                         automatic_reset=automatic_reset)
 
+
+        # self.observation_space = gym.spaces.Box(
+        #         low=-np.inf, high=np.inf,
+        #         shape=(20, ),
+        #         dtype=np.float32)
         self.observation_space = gym.spaces.Box(
-                low=-np.inf, high=np.inf,
-                shape=(20, ),
-                dtype=np.float32)
+                low=0.0, high=255.0,
+                shape=(self.image_height, self.image_width, 3),
+                dtype=np.uint8)
 
     def step(self, action):
         state, reward, done, info = super(NavigateGibsonEnv, self).step(action)
 
-        proprio_state = self.robots[0].calc_state()
-        task_obs = self.task.get_task_obs(self)
-        custom_state = np.concatenate([task_obs[:-2], proprio_state], 0)
+        # [0, 1] -> [0, 255]
+        rgb = state['rgb'] * 255
+
+        # proprio_state = self.robots[0].calc_state()
+        # task_obs = self.task.get_task_obs(self)
+        # custom_state = np.concatenate([task_obs[:-2], proprio_state], 0)
+
+        custom_state = rgb
 
         return custom_state, reward, done, info
 
     def reset(self):
+        if np.random.uniform() < 0.5:
+            self.task.target_pos = np.array([0.4, 0.9, 0.0])
+        else:
+            self.task.target_pos = np.array([0.2, -0.2, 0.0])
+
         state = super(NavigateGibsonEnv, self).reset()
 
-        proprio_state = self.robots[0].calc_state()
-        task_obs = self.task.get_task_obs(self)
-        custom_state = np.concatenate([task_obs[:-2], proprio_state], 0)
+        # [0, 1] -> [0, 255]
+        rgb = state['rgb'] * 255
+
+        # proprio_state = self.robots[0].calc_state()
+        # task_obs = self.task.get_task_obs(self)
+        # custom_state = np.concatenate([task_obs[:-2], proprio_state], 0)
+
+        custom_state = rgb
 
         return custom_state
 
@@ -78,11 +111,14 @@ def train_action_sampler(params):
                     device_idx=params.gpu_num
     )
 
+    # necessary: wrap the environment
+    vec_env = VecTransposeImage(DummyVecEnv([lambda: env]))
+
     # Use deterministic actions for evaluation
     logdir = os.path.join(rootdir, 'logs')
     savedir = os.path.join(rootdir, 'best_model')
     eval_callback = EvalCallback(
-                    eval_env=env,
+                    eval_env=vec_env,
                     n_eval_episodes=params.n_eval,
                     eval_freq=params.eval_freq,
                     log_path=logdir,
@@ -94,12 +130,19 @@ def train_action_sampler(params):
     # Create the callback list
     callback_list = CallbackList([eval_callback])
 
+    # policy_kwargs = dict(
+    #     net_arch=[512, 512],
+    # )
     policy_kwargs = dict(
-        net_arch=[512, 512],
+        features_extractor_class=CustomCNN,
+        features_extractor_kwargs=dict(
+                        features_dim=512
+        ),
     )
     model = SAC(
-                policy='MlpPolicy',
-                env=env,
+                policy='CnnPolicy', #policy='MlpPolicy',
+                env=vec_env,
+                buffer_size=5000,
                 tensorboard_log=logdir,
                 policy_kwargs=policy_kwargs,
                 verbose=1,
@@ -135,12 +178,22 @@ def test_action_sampler(params):
                     device_idx=params.gpu_num
     )
 
+    # necessary: wrap the environment
+    vec_env = VecTransposeImage(DummyVecEnv([lambda: env]))
+
+    # policy_kwargs = dict(
+    #     net_arch=[512, 512],
+    # )
     policy_kwargs = dict(
-        net_arch=[512, 512],
+        features_extractor_class=CustomCNN,
+        features_extractor_kwargs=dict(
+                        features_dim=512
+        ),
     )
     model = SAC(
-                policy='MlpPolicy',
-                env=env,
+                policy='CnnPolicy', #policy='MlpPolicy',
+                env=vec_env,
+                buffer_size=5000,
                 tensorboard_log=None,
                 policy_kwargs=policy_kwargs,
                 verbose=1,
@@ -152,7 +205,7 @@ def test_action_sampler(params):
     # mean_reward, std_reward = evaluate_policy(model, env)
     # print(f"Mean reward = {mean_reward:.2f} +/- {std_reward:.2f}")
 
-    for _ in range(1):
+    for _ in range(2):
         obs = env.reset()
         while True:
             action, _states = model.predict(obs, deterministic=True)
@@ -174,7 +227,7 @@ def parse_args():
 
     argparser = argparse.ArgumentParser()
 
-    argparser.add_argument('--n_train', type=int, default=1e6)
+    argparser.add_argument('--n_train', type=int, default=5e5)
     argparser.add_argument('--n_eval', type=int, default=5)
     argparser.add_argument('--eval_freq', type=int, default=1e4)
     argparser.add_argument('--seed', type=int, default='42', help='Fix the random seed of numpy and tensorflow.')

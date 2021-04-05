@@ -113,14 +113,15 @@ def normalize_observation(x):
     else:   # rgb
         return x * (2.0 / 255.0) - 1.0
 
-def process_raw_image(image):
+def process_raw_image(image, resize=(56, 56)):
     """
     Decode and normalize image
     :param image: image encoded as a png (H, W, ch)
-    :return np.ndarray: images (56, 56, ch) normalized for training
+    :param resize: resize image (new_H, new_W)
+    :return np.ndarray: images (new_H, new_W, ch) normalized for training
     """
 
-    image = decode_image(image, (56, 56))
+    image = decode_image(image, resize)
     image = normalize_observation(np.atleast_3d(image.astype(np.float32)))
 
     return image
