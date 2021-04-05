@@ -5,6 +5,7 @@ import gym
 import torch
 import argparse
 import datetime
+import cv2 as cv
 import numpy as np
 import tensorflow as tf
 from pathlib import Path
@@ -55,22 +56,23 @@ class NavigateGibsonEnv(iGibsonEnv):
         #         low=-np.inf, high=np.inf,
         #         shape=(20, ),
         #         dtype=np.float32)
+        output_size = 20 + np.prod((210, 160, 3))
         self.observation_space = gym.spaces.Box(
-                low=0.0, high=255.0,
-                shape=(self.image_height, self.image_width, 3),
-                dtype=np.uint8)
+                low=-np.inf, high=np.inf,
+                shape=(output_size, ),
+                dtype=np.float32)
 
     def step(self, action):
         state, reward, done, info = super(NavigateGibsonEnv, self).step(action)
 
         # [0, 1] -> [0, 255]
-        rgb = state['rgb'] * 255
+        rgb_obs = state['rgb'] * 255
 
-        # proprio_state = self.robots[0].calc_state()
-        # task_obs = self.task.get_task_obs(self)
-        # custom_state = np.concatenate([task_obs[:-2], proprio_state], 0)
-
-        custom_state = rgb
+        custom_state = np.concatenate([
+                        self.task.get_task_obs(self)[:-2], # goal x,y relative distance
+                        self.robots[0].calc_state(),    # proprioceptive state
+                        np.reshape(rgb_obs, [-1])   # rgb observation
+                    ], 0)
 
         return custom_state, reward, done, info
 
@@ -83,13 +85,13 @@ class NavigateGibsonEnv(iGibsonEnv):
         state = super(NavigateGibsonEnv, self).reset()
 
         # [0, 1] -> [0, 255]
-        rgb = state['rgb'] * 255
+        rgb_obs = state['rgb'] * 255
 
-        # proprio_state = self.robots[0].calc_state()
-        # task_obs = self.task.get_task_obs(self)
-        # custom_state = np.concatenate([task_obs[:-2], proprio_state], 0)
-
-        custom_state = rgb
+        custom_state = np.concatenate([
+                        self.task.get_task_obs(self)[:-2], # goal x,y relative distance
+                        self.robots[0].calc_state(),    # proprioceptive state
+                        np.reshape(rgb_obs, [-1])   # rgb observation
+                    ], 0)
 
         return custom_state
 
@@ -111,14 +113,14 @@ def train_action_sampler(params):
                     device_idx=params.gpu_num
     )
 
-    # necessary: wrap the environment
-    vec_env = VecTransposeImage(DummyVecEnv([lambda: env]))
+    # # necessary: wrap the environment
+    # vec_env = VecTransposeImage(DummyVecEnv([lambda: env]))
 
     # Use deterministic actions for evaluation
     logdir = os.path.join(rootdir, 'logs')
     savedir = os.path.join(rootdir, 'best_model')
     eval_callback = EvalCallback(
-                    eval_env=vec_env,
+                    eval_env=env,
                     n_eval_episodes=params.n_eval,
                     eval_freq=params.eval_freq,
                     log_path=logdir,
@@ -140,8 +142,8 @@ def train_action_sampler(params):
         ),
     )
     model = SAC(
-                policy='CnnPolicy', #policy='MlpPolicy',
-                env=vec_env,
+                policy='MlpPolicy',
+                env=env,
                 buffer_size=5000,
                 tensorboard_log=logdir,
                 policy_kwargs=policy_kwargs,
@@ -178,8 +180,8 @@ def test_action_sampler(params):
                     device_idx=params.gpu_num
     )
 
-    # necessary: wrap the environment
-    vec_env = VecTransposeImage(DummyVecEnv([lambda: env]))
+    # # necessary: wrap the environment
+    # vec_env = VecTransposeImage(DummyVecEnv([lambda: env]))
 
     # policy_kwargs = dict(
     #     net_arch=[512, 512],
@@ -191,8 +193,8 @@ def test_action_sampler(params):
         ),
     )
     model = SAC(
-                policy='CnnPolicy', #policy='MlpPolicy',
-                env=vec_env,
+                policy='MlpPolicy',
+                env=env,
                 buffer_size=5000,
                 tensorboard_log=None,
                 policy_kwargs=policy_kwargs,

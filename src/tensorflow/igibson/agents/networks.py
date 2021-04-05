@@ -5,7 +5,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 import torchvision.models as models
 from stable_baselines3 import PPO
 import torch.nn as nn
-import torch as th
+import torch
 import gym
 
 class CustomCNN(BaseFeaturesExtractor):
@@ -20,9 +20,11 @@ class CustomCNN(BaseFeaturesExtractor):
         super(CustomCNN, self).__init__(observation_space, features_dim)
         # We assume CxHxW images (channels first)
         # Re-ordering will be done by pre-preprocessing or wrapper
-        n_input_channels = observation_space.shape[0]
+        self.image_shape = (3, 210, 160)
+        self.prorio_shape = 20
+
         self.cnn = nn.Sequential(
-            nn.Conv2d(n_input_channels, 32, kernel_size=8, stride=4, padding=0),
+            nn.Conv2d(self.image_shape[0], 32, kernel_size=8, stride=4, padding=0),
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
             nn.ReLU(),
@@ -30,15 +32,30 @@ class CustomCNN(BaseFeaturesExtractor):
         )
 
         # Compute shape by doing one forward pass
-        with th.no_grad():
-            n_flatten = self.cnn(
-                th.as_tensor(observation_space.sample()[None]).float()
-            ).shape[1]
+        with torch.no_grad():
+            observations = torch.as_tensor(observation_space.sample()[None]).float()
+            _, rgb_obs = torch.split(
+                                observations,
+                                [self.prorio_shape, observations.shape[-1] - self.prorio_shape],
+                                dim=-1
+            )
+            rgb_obs = torch.reshape(rgb_obs, [-1, *self.image_shape])   # [1, 3, H, W]
+            n_flatten = self.cnn(rgb_obs).shape[1] + self.prorio_shape
 
         self.linear = nn.Sequential(nn.Linear(n_flatten, features_dim), nn.ReLU())
 
-    def forward(self, observations: th.Tensor) -> th.Tensor:
-        return self.linear(self.cnn(observations))
+    def forward(self, observations: torch.Tensor) -> torch.Tensor:
+        robot_state, rgb_obs = torch.split(
+                            observations,
+                            [self.prorio_shape, observations.shape[-1] - self.prorio_shape],
+                            dim=-1
+        )
+        rgb_obs = torch.reshape(rgb_obs, [-1, *self.image_shape])  # [1, 3, H, W]
+        rgb_features = self.cnn(rgb_obs)
+
+        combined_features = torch.cat([robot_state, rgb_features], axis=-1)
+
+        return self.linear(combined_features)
 
 if __name__ == '__main__':
     policy_kwargs = dict(
