@@ -1,0 +1,12 @@
+
+agents/runs/20210403-093611
+PPO agent with simple fixed point nav task
+
+agents/runs/20210404-161944
+SAC agent with very simple fixed point nav task (proprio obs)
+
+agents/runs/20210405-105509
+SAC agent with uniform random two point nav task (proprio obs)
+
+agents/runs/20210406-082924
+SAC agent with uniform random two point nav task (proprio + rgb obs)

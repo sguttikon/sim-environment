@@ -56,7 +56,7 @@ class NavigateGibsonEnv(iGibsonEnv):
         #         low=-np.inf, high=np.inf,
         #         shape=(20, ),
         #         dtype=np.float32)
-        output_size = 20 + np.prod((210, 160, 3))
+        output_size = 20 + np.prod((56, 56, 3))
         self.observation_space = gym.spaces.Box(
                 low=-np.inf, high=np.inf,
                 shape=(output_size, ),
@@ -65,8 +65,8 @@ class NavigateGibsonEnv(iGibsonEnv):
     def step(self, action):
         state, reward, done, info = super(NavigateGibsonEnv, self).step(action)
 
-        # [0, 1] -> [0, 255]
-        rgb_obs = state['rgb'] * 255
+        # process image for training
+        rgb_obs = datautils.process_raw_image(state['rgb'])
 
         custom_state = np.concatenate([
                         self.task.get_task_obs(self)[:-2], # goal x,y relative distance
@@ -84,8 +84,8 @@ class NavigateGibsonEnv(iGibsonEnv):
 
         state = super(NavigateGibsonEnv, self).reset()
 
-        # [0, 1] -> [0, 255]
-        rgb_obs = state['rgb'] * 255
+        # process image for training
+        rgb_obs = datautils.process_raw_image(state['rgb'])
 
         custom_state = np.concatenate([
                         self.task.get_task_obs(self)[:-2], # goal x,y relative distance
@@ -144,7 +144,6 @@ def train_action_sampler(params):
     model = SAC(
                 policy='MlpPolicy',
                 env=env,
-                buffer_size=5000,
                 tensorboard_log=logdir,
                 policy_kwargs=policy_kwargs,
                 verbose=1,
@@ -195,6 +194,7 @@ def test_action_sampler(params):
     model = SAC(
                 policy='MlpPolicy',
                 env=env,
+                batch_size=32,
                 buffer_size=5000,
                 tensorboard_log=None,
                 policy_kwargs=policy_kwargs,
@@ -207,7 +207,7 @@ def test_action_sampler(params):
     # mean_reward, std_reward = evaluate_policy(model, env)
     # print(f"Mean reward = {mean_reward:.2f} +/- {std_reward:.2f}")
 
-    for _ in range(2):
+    for _ in range(5):
         obs = env.reset()
         while True:
             action, _states = model.predict(obs, deterministic=True)
@@ -229,7 +229,7 @@ def parse_args():
 
     argparser = argparse.ArgumentParser()
 
-    argparser.add_argument('--n_train', type=int, default=5e5)
+    argparser.add_argument('--n_train', type=int, default=1e6)
     argparser.add_argument('--n_eval', type=int, default=5)
     argparser.add_argument('--eval_freq', type=int, default=1e4)
     argparser.add_argument('--seed', type=int, default='42', help='Fix the random seed of numpy and tensorflow.')

@@ -203,3 +203,11 @@ Mar 31th 2021
 1. collect manual data and override replay buffer
 2. experiment with exploration parameters like ent_coef=0.1
 3. try to use easy start and goal position
+
+April 7th 2021
+--------------
+1. rgb + robot state + goal position -> navigation
+2. rgb + robot state (linear & angular vel) + particles (mean est position) -> localization
+    reward: 1. negative loglikelihood
+            2. mse gt_position vs est_position mean
+            3. checkout deep active localization paper for other reward function
