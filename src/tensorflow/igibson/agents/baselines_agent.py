@@ -56,7 +56,7 @@ class NavigateGibsonEnv(iGibsonEnv):
         #         low=-np.inf, high=np.inf,
         #         shape=(20, ),
         #         dtype=np.float32)
-        output_size = 20 + np.prod((56, 56, 3))
+        output_size = 20 + np.prod((56, 56, 3))  # [H, W, C]
         self.observation_space = gym.spaces.Box(
                 low=-np.inf, high=np.inf,
                 shape=(output_size, ),
@@ -66,7 +66,8 @@ class NavigateGibsonEnv(iGibsonEnv):
         state, reward, done, info = super(NavigateGibsonEnv, self).step(action)
 
         # process image for training
-        rgb_obs = datautils.process_raw_image(state['rgb'])
+        # rgb_obs = datautils.process_raw_image(state['rgb'])
+        rgb_obs = state['rgb']
 
         custom_state = np.concatenate([
                         self.task.get_task_obs(self)[:-2], # goal x,y relative distance
@@ -85,7 +86,8 @@ class NavigateGibsonEnv(iGibsonEnv):
         state = super(NavigateGibsonEnv, self).reset()
 
         # process image for training
-        rgb_obs = datautils.process_raw_image(state['rgb'])
+        # rgb_obs = datautils.process_raw_image(state['rgb'])
+        rgb_obs = state['rgb']
 
         custom_state = np.concatenate([
                         self.task.get_task_obs(self)[:-2], # goal x,y relative distance

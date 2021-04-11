@@ -21,7 +21,7 @@ class CustomCNN(BaseFeaturesExtractor):
         super(CustomCNN, self).__init__(observation_space, features_dim)
         # We assume CxHxW images (channels first)
         # Re-ordering will be done by pre-preprocessing or wrapper
-        self.image_shape = (3, 56, 56)
+        self.image_shape = (56, 56, 3) # [H, W, C]
         self.prorio_shape = 20
 
         block1_layers = [
@@ -49,7 +49,16 @@ class CustomCNN(BaseFeaturesExtractor):
         ]
         self.block3 = nn.ModuleList(block3_layers)
 
-        n_flatten = self.prorio_shape + np.product((16, 14, 14)) # obs_featues shape
+        self.cnn = nn.Sequential(
+            nn.Conv2d(self.image_shape[2], 32, kernel_size=8, stride=4, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
+            nn.ReLU(),
+            nn.Flatten(),
+        )
+
+        # n_flatten = self.prorio_shape + np.product((16, 14, 14)) # obs_featues shape
+        n_flatten = self.prorio_shape + np.product((64, 5, 5)) # obs_featues shape
         self.linear = nn.Sequential(nn.Linear(n_flatten, features_dim), nn.ReLU())
 
     def get_obs_features(self, observation):
@@ -77,9 +86,11 @@ class CustomCNN(BaseFeaturesExtractor):
                             [self.prorio_shape, observations.shape[-1] - self.prorio_shape],
                             dim=-1
         )
-        rgb_obs = torch.reshape(rgb_obs, [-1, *self.image_shape])  # [1, 3, H, W]
-        rgb_features = nn.Flatten()(self.get_obs_features(rgb_obs))
+        rgb_obs = torch.reshape(rgb_obs, [-1, *self.image_shape])  # [1, H, W, C]
+        rgb_obs = rgb_obs.permute(0, 3, 1, 2) # [1, C, H, W]
 
+        #rgb_features = nn.Flatten()(self.get_obs_features(rgb_obs))
+        rgb_features = self.cnn(rgb_obs)
         combined_features = torch.cat([robot_state, rgb_features], axis=-1)
 
         return self.linear(combined_features)
