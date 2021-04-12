@@ -209,13 +209,13 @@ def test_action_sampler(params):
                 seed=params.seed,
                 device=params.gpu_num)
 
-    # custom_objects = dict(
-    #         batch_size=32,
-    #         buffer_size=5000,
-    # )
-    # model = SAC.load(
-    #             path=savedir + '/best_model',
-    #             custom_objects=custom_objects)
+    custom_objects = dict(
+            batch_size=32,
+            buffer_size=5000,
+    )
+    model = SAC.load(
+                path=savedir + '/best_model',
+                custom_objects=custom_objects)
     print('====> loaded pretrained model')
 
     # mean_reward, std_reward = evaluate_policy(model, env)
