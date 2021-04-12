@@ -12,6 +12,7 @@ from pathlib import Path
 from networks import CustomCNN
 from stable_baselines3 import PPO
 from stable_baselines3 import SAC
+# from matplotlib import pyplot as plt
 from gibson2.envs.igibson_env import iGibsonEnv
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.callbacks import CallbackList
@@ -56,7 +57,7 @@ class NavigateGibsonEnv(iGibsonEnv):
         #         low=-np.inf, high=np.inf,
         #         shape=(20, ),
         #         dtype=np.float32)
-        output_size = 20 + np.prod((56, 56, 3))  # [H, W, C]
+        output_size = 20 + np.prod((128, 128, 3))  # [H, W, C]
         self.observation_space = gym.spaces.Box(
                 low=-np.inf, high=np.inf,
                 shape=(output_size, ),
@@ -69,6 +70,10 @@ class NavigateGibsonEnv(iGibsonEnv):
         # rgb_obs = datautils.process_raw_image(state['rgb'])
         rgb_obs = state['rgb']
 
+        # # visualize
+        # plt.imshow(rgb_obs)
+        # plt.show()
+
         custom_state = np.concatenate([
                         self.task.get_task_obs(self)[:-2], # goal x,y relative distance
                         self.robots[0].calc_state(),    # proprioceptive state
@@ -79,7 +84,7 @@ class NavigateGibsonEnv(iGibsonEnv):
 
     def reset(self):
         if np.random.uniform() < 0.5:
-            self.task.target_pos = np.array([0.4, 0.9, 0.0])
+            self.task.target_pos = np.array([0.3, 0.9, 0.0])
         else:
             self.task.target_pos = np.array([0.2, -0.2, 0.0])
 
@@ -203,7 +208,14 @@ def test_action_sampler(params):
                 verbose=1,
                 seed=params.seed,
                 device=params.gpu_num)
-    model = SAC.load(savedir + '/best_model')
+
+    # custom_objects = dict(
+    #         batch_size=32,
+    #         buffer_size=5000,
+    # )
+    # model = SAC.load(
+    #             path=savedir + '/best_model',
+    #             custom_objects=custom_objects)
     print('====> loaded pretrained model')
 
     # mean_reward, std_reward = evaluate_policy(model, env)

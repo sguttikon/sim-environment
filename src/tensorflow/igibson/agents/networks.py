@@ -2,6 +2,7 @@
 
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.vec_env import DummyVecEnv
+# from matplotlib import pyplot as plt
 import torchvision.models as models
 from stable_baselines3 import PPO
 import torch.nn as nn
@@ -21,7 +22,7 @@ class CustomCNN(BaseFeaturesExtractor):
         super(CustomCNN, self).__init__(observation_space, features_dim)
         # We assume CxHxW images (channels first)
         # Re-ordering will be done by pre-preprocessing or wrapper
-        self.image_shape = (56, 56, 3) # [H, W, C]
+        self.image_shape = (128, 128, 3) # [H, W, C]
         self.prorio_shape = 20
 
         block1_layers = [
@@ -57,11 +58,17 @@ class CustomCNN(BaseFeaturesExtractor):
             nn.Flatten(),
         )
 
-        # n_flatten = self.prorio_shape + np.product((16, 14, 14)) # obs_featues shape
-        n_flatten = self.prorio_shape + np.product((64, 5, 5)) # obs_featues shape
+        # Compute shape by doing one forward pass
+        with torch.no_grad():
+            observations = torch.as_tensor(observation_space.sample()[None]).float()
+            robot_state, rgb_obs = self._process_env_obs(observations)
+
+            # n_flatten = self.prorio_shape + self._get_obs_features(rgb_obs).shape[1]
+            n_flatten = self.prorio_shape + self.cnn(rgb_obs).shape[1]
+
         self.linear = nn.Sequential(nn.Linear(n_flatten, features_dim), nn.ReLU())
 
-    def get_obs_features(self, observation):
+    def _get_obs_features(self, observation):
         x = observation
 
         # block1
@@ -78,9 +85,10 @@ class CustomCNN(BaseFeaturesExtractor):
         for _, l in enumerate(self.block3):
             x = l(x)
 
-        return x # [batch_size, 16, 14, 14]
+        x = nn.Flatten()(x) # [batch_size, 16, 14, 14]
+        return x    # [batch_size, 9216]
 
-    def forward(self, observations: torch.Tensor) -> torch.Tensor:
+    def _process_env_obs(self, observations):
         robot_state, rgb_obs = torch.split(
                             observations,
                             [self.prorio_shape, observations.shape[-1] - self.prorio_shape],
@@ -89,7 +97,17 @@ class CustomCNN(BaseFeaturesExtractor):
         rgb_obs = torch.reshape(rgb_obs, [-1, *self.image_shape])  # [1, H, W, C]
         rgb_obs = rgb_obs.permute(0, 3, 1, 2) # [1, C, H, W]
 
-        #rgb_features = nn.Flatten()(self.get_obs_features(rgb_obs))
+        return robot_state, rgb_obs
+
+    def forward(self, observations: torch.Tensor) -> torch.Tensor:
+        robot_state, rgb_obs = self._process_env_obs(observations)
+
+        # # visualize
+        # env_obs = rgb_obs.permute(0, 2, 3, 1)[0].cpu().numpy()
+        # plt.imshow(env_obs)
+        # plt.show()
+
+        #rgb_features = self._get_obs_features(rgb_obs)
         rgb_features = self.cnn(rgb_obs)
         combined_features = torch.cat([robot_state, rgb_features], axis=-1)
 
