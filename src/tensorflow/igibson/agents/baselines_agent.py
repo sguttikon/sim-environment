@@ -57,7 +57,7 @@ class NavigateGibsonEnv(iGibsonEnv):
         #         low=-np.inf, high=np.inf,
         #         shape=(20, ),
         #         dtype=np.float32)
-        output_size = 20 + np.prod((128, 128, 3))  # [H, W, C]
+        output_size = 20 + np.prod((56, 56, 3))  # [H, W, C]
         self.observation_space = gym.spaces.Box(
                 low=-np.inf, high=np.inf,
                 shape=(output_size, ),
@@ -84,9 +84,9 @@ class NavigateGibsonEnv(iGibsonEnv):
 
     def reset(self):
         if np.random.uniform() < 0.5:
-            self.task.target_pos = np.array([0.3, 0.9, 0.0])
+            self.task.target_pos = np.array([-0.5, 0.9, 0.0])
         else:
-            self.task.target_pos = np.array([0.2, -0.2, 0.0])
+            self.task.target_pos = np.array([-0.5, -0.2, 0.0])
 
         state = super(NavigateGibsonEnv, self).reset()
 
@@ -125,7 +125,7 @@ def train_action_sampler(params):
 
     # Use deterministic actions for evaluation
     logdir = os.path.join(rootdir, 'logs')
-    savedir = os.path.join(rootdir, 'best_model')
+    savedir = os.path.join(rootdir, 'best_models')
     eval_callback = EvalCallback(
                     eval_env=env,
                     n_eval_episodes=params.n_eval,
@@ -147,6 +147,7 @@ def train_action_sampler(params):
         features_extractor_kwargs=dict(
                         features_dim=512
         ),
+        net_arch=[256, 256],
     )
     model = SAC(
                 policy='MlpPolicy',
@@ -170,8 +171,8 @@ def train_action_sampler(params):
 
 def test_action_sampler(params):
 
-    rootdir = './runs/20210331-083433'
-    savedir = os.path.join(rootdir, 'best_model')
+    rootdir = './runs/20210413-090921'
+    savedir = os.path.join(rootdir, 'best_models')
 
     # create gym env
     config_filename = os.path.join(
@@ -197,6 +198,7 @@ def test_action_sampler(params):
         features_extractor_kwargs=dict(
                         features_dim=512
         ),
+        net_arch=[256, 256],
     )
     model = SAC(
                 policy='MlpPolicy',
@@ -216,7 +218,7 @@ def test_action_sampler(params):
     model = SAC.load(
                 path=savedir + '/best_model',
                 custom_objects=custom_objects)
-    print('====> loaded pretrained model')
+    print(f'====> loaded pretrained model : {savedir + "/best_model"}')
 
     # mean_reward, std_reward = evaluate_policy(model, env)
     # print(f"Mean reward = {mean_reward:.2f} +/- {std_reward:.2f}")
@@ -227,7 +229,7 @@ def test_action_sampler(params):
             action, _states = model.predict(obs, deterministic=True)
             obs, reward, done, info = env.step(action)
             if done:
-                print(reward)
+                print(f'episode end reward: {reward}')
                 break
 
     env.close()

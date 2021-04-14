@@ -211,3 +211,9 @@ April 7th 2021
     reward: 1. negative loglikelihood
             2. mse gt_position vs est_position mean
             3. checkout deep active localization paper for other reward function
+
+April 14th 2021
+---------------
+1. decrease even further goal positions
+2. increase episode length to 1000
+3. increase linear layer capacity

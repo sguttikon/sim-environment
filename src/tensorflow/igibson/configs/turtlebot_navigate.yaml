@@ -39,8 +39,8 @@ discount_factor: 0.99
 
 # termination condition
 dist_tol: 0.36  # body width
-max_step: 500
-max_collisions_allowed: 500
+max_step: 1000
+max_collisions_allowed: 1000
 
 # misc config
 initial_pos_z_offset: 0.1
@@ -52,8 +52,8 @@ output: [task_obs, rgb, depth, scan]
 # ASUS Xtion PRO LIVE
 # https://www.asus.com/us/3D-Sensor/Xtion_PRO_LIVE
 fisheye: false
-image_width: 128
-image_height: 128
+image_width: 56
+image_height: 56
 vertical_fov: 45
 # depth
 depth_low: 0.8

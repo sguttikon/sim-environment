@@ -22,7 +22,7 @@ class CustomCNN(BaseFeaturesExtractor):
         super(CustomCNN, self).__init__(observation_space, features_dim)
         # We assume CxHxW images (channels first)
         # Re-ordering will be done by pre-preprocessing or wrapper
-        self.image_shape = (128, 128, 3) # [H, W, C]
+        self.image_shape = (56, 56, 3) # [H, W, C]
         self.prorio_shape = 20
 
         block1_layers = [
@@ -66,7 +66,10 @@ class CustomCNN(BaseFeaturesExtractor):
             # n_flatten = self.prorio_shape + self._get_obs_features(rgb_obs).shape[1]
             n_flatten = self.prorio_shape + self.cnn(rgb_obs).shape[1]
 
-        self.linear = nn.Sequential(nn.Linear(n_flatten, features_dim), nn.ReLU())
+        self.linear = nn.Sequential(
+            nn.Linear(n_flatten, features_dim),
+            nn.ReLU(),
+        )
 
     def _get_obs_features(self, observation):
         x = observation
