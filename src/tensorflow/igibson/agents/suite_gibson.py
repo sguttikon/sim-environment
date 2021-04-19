@@ -45,10 +45,17 @@ class NavigateGibsonEnv(iGibsonEnv):
                         automatic_reset=automatic_reset)
 
         observation_space = OrderedDict()
+        IMG_WIDTH = 56
+        IMG_HEIGHT = 56
+        TASK_OBS_DIM = 20
 
         observation_space['task_obs'] = gym.spaces.Box(
                 low=-np.inf, high=+np.inf,
-                shape=(20,),    # task_obs + proprioceptive_obs
+                shape=(TASK_OBS_DIM,),    # task_obs + proprioceptive_obs
+                dtype=np.float32)
+        observation_space['rgb'] = gym.spaces.Box(
+                low=-1.0, high=+1.0,
+                shape=(IMG_HEIGHT, IMG_WIDTH, 3),
                 dtype=np.float32)
 
         self.observation_space = gym.spaces.Dict(observation_space)
@@ -61,6 +68,7 @@ class NavigateGibsonEnv(iGibsonEnv):
                         self.task.get_task_obs(self)[:-2], # goal x,y relative distance
                         self.robots[0].calc_state(),    # proprioceptive state
                     ], 0)
+        custom_state['rgb'] = state['rgb']  # [0, 1] range rgb image
 
         return custom_state, reward, done, info
 
@@ -77,6 +85,7 @@ class NavigateGibsonEnv(iGibsonEnv):
                         self.task.get_task_obs(self)[:-2], # goal x,y relative distance
                         self.robots[0].calc_state(),    # proprioceptive state
                     ], 0)
+        custom_state['rgb'] = state['rgb']  # [0, 1] range rgb image
 
         return custom_state
 
