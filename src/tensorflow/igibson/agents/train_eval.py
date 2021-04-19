@@ -57,6 +57,7 @@ def set_path(path: str):
         sys.path.insert(0, path)
 # path to custom tf_agents
 set_path('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src/tensorflow/stanford/agents')
+# set_path('/home/guttikon/awesome_robotics/sim-environment/src/tensorflow/stanford/agents')
 
 from tf_agents.system import system_multiprocessing as multiprocessing
 from tf_agents.agents.ddpg import critic_network

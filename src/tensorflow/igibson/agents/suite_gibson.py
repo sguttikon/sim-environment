@@ -13,8 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections import OrderedDict
 from gibson2.envs.igibson_env import iGibsonEnv
 import gibson2
+import gym
+import numpy as np
 
 from tf_agents.environments import gym_wrapper
 from tf_agents.environments import wrappers
@@ -32,7 +35,6 @@ class NavigateGibsonEnv(iGibsonEnv):
         render_to_tensor=False,
         automatic_reset=False,
     ):
-
         super(NavigateGibsonEnv, self).__init__(config_file=config_file,
                         scene_id=scene_id,
                         mode=mode,
@@ -42,15 +44,41 @@ class NavigateGibsonEnv(iGibsonEnv):
                         render_to_tensor=render_to_tensor,
                         automatic_reset=automatic_reset)
 
+        observation_space = OrderedDict()
+
+        observation_space['task_obs'] = gym.spaces.Box(
+                low=-np.inf, high=+np.inf,
+                shape=(20,),    # task_obs + proprioceptive_obs
+                dtype=np.float32)
+
+        self.observation_space = gym.spaces.Dict(observation_space)
+
     def step(self, action):
         state, reward, done, info = super(NavigateGibsonEnv, self).step(action)
 
-        return state, reward, done, info
+        custom_state = OrderedDict()
+        custom_state['task_obs'] = np.concatenate([
+                        self.task.get_task_obs(self)[:-2], # goal x,y relative distance
+                        self.robots[0].calc_state(),    # proprioceptive state
+                    ], 0)
+
+        return custom_state, reward, done, info
 
     def reset(self):
+        if np.random.uniform() < 0.5:
+            self.task.target_pos = np.array([-0.5, 0.9, 0.0])
+        else:
+            self.task.target_pos = np.array([-0.5, -0.2, 0.0])
+
         state = super(NavigateGibsonEnv, self).reset()
 
-        return state
+        custom_state = OrderedDict()
+        custom_state['task_obs'] = np.concatenate([
+                        self.task.get_task_obs(self)[:-2], # goal x,y relative distance
+                        self.robots[0].calc_state(),    # proprioceptive state
+                    ], 0)
+
+        return custom_state
 
 def load(config_file,
          model_id=None,
