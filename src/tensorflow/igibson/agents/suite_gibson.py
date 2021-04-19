@@ -18,9 +18,21 @@ from gibson2.envs.igibson_env import iGibsonEnv
 import gibson2
 import gym
 import numpy as np
+import os
+
+import sys
+def set_path(path: str):
+    try:
+        sys.path.index(path)
+    except ValueError:
+        sys.path.insert(0, path)
+# path to custom tf_agents
+set_path('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src/tensorflow/stanford/agents')
 
 from tf_agents.environments import gym_wrapper
+from tf_agents.environments import tf_py_environment
 from tf_agents.environments import wrappers
+from tf_agents.policies import random_tf_policy
 
 class NavigateGibsonEnv(iGibsonEnv):
 
@@ -74,9 +86,9 @@ class NavigateGibsonEnv(iGibsonEnv):
 
     def reset(self):
         if np.random.uniform() < 0.5:
-            self.task.target_pos = np.array([-0.5, 0.9, 0.0])
+            self.task.target_pos = np.array([0.3, 0.9, 0.0])
         else:
-            self.task.target_pos = np.array([-0.5, -0.2, 0.0])
+            self.task.target_pos = np.array([0.2, -0.2, 0.0])
 
         state = super(NavigateGibsonEnv, self).reset()
 
@@ -146,3 +158,20 @@ def wrap_env(env,
         env = wrapper(env)
 
     return env
+
+if __name__ == '__main__':
+    eval_py_env = load(
+        config_file=os.path.join('../configs/', 'turtlebot_navigate.yaml'),
+        env_mode='gui',
+        device_idx=0,
+    )
+    eval_tf_env = tf_py_environment.TFPyEnvironment(eval_py_env)
+    rnd_policy = random_tf_policy.RandomTFPolicy(
+                    time_step_spec=eval_tf_env.time_step_spec(),
+                    action_spec=eval_tf_env.action_spec())
+
+    for _ in range(5):
+        time_step = eval_tf_env.reset()
+        for _ in range(100):
+            action_step = rnd_policy.action(time_step)
+            time_step = eval_tf_env.step(action_step.action)
