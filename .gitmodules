@@ -1,3 +1,7 @@
 [submodule "envs/iGibson"]
 	path = envs/iGibson
 	url = https://github.com/StanfordVL/iGibson
+[submodule "src/tensorflow/stanford/agents"]
+	path = src/tensorflow/stanford/agents
+	url = https://github.com/StanfordVL/agents.git
+	branch = cvpr21_challenge_tf2.4
