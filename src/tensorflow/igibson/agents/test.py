@@ -237,8 +237,8 @@ def train_eval(
         time_step_spec = tf_env.time_step_spec()
         observation_spec = time_step_spec.observation
         action_spec = tf_env.action_spec()
-        print('observation_spec', observation_spec)
-        print('action_spec', action_spec)
+        print('observation_spec: ', observation_spec)
+        print('action_spec: ', action_spec)
 
         glorot_uniform_initializer = tf.compat.v1.keras.initializers.glorot_uniform()
         preprocessing_layers = {}
@@ -354,20 +354,20 @@ def train_eval(
             ckpt_dir=os.path.join(train_dir, 'policy'),
             policy=eval_policy,
             global_step=global_step)
-        rb_checkpointer = common.Checkpointer(
-            ckpt_dir=os.path.join(train_dir, 'replay_buffer'),
-            max_to_keep=1,
-            replay_buffer=replay_buffer)
+        # rb_checkpointer = common.Checkpointer(
+        #     ckpt_dir=os.path.join(train_dir, 'replay_buffer'),
+        #     max_to_keep=1,
+        #     replay_buffer=replay_buffer)
 
         train_checkpointer.initialize_or_restore()
-        rb_checkpointer.initialize_or_restore()
+        # rb_checkpointer.initialize_or_restore()
 
     for _ in range(num_eval_episodes):
         time_step = eval_tf_env.reset()
         while not time_step.is_last():
             action_step = eval_policy.action(time_step)
             time_step = eval_tf_env.step(action_step.action)
-            print(time_step.reward)
+        print(time_step.reward)
 
 def main(_):
     tf.compat.v1.enable_v2_behavior()

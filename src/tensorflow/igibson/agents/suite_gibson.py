@@ -28,6 +28,7 @@ def set_path(path: str):
         sys.path.insert(0, path)
 # path to custom tf_agents
 set_path('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src/tensorflow/stanford/agents')
+# set_path('/home/guttikon/awesome_robotics/sim-environment/src/tensorflow/stanford/agents')
 
 from tf_agents.environments import gym_wrapper
 from tf_agents.environments import tf_py_environment
@@ -61,10 +62,10 @@ class NavigateGibsonEnv(iGibsonEnv):
         IMG_HEIGHT = 56
         TASK_OBS_DIM = 20
 
-        observation_space['task_obs'] = gym.spaces.Box(
-                low=-np.inf, high=+np.inf,
-                shape=(TASK_OBS_DIM,),    # task_obs + proprioceptive_obs
-                dtype=np.float32)
+        # observation_space['task_obs'] = gym.spaces.Box(
+        #         low=-np.inf, high=+np.inf,
+        #         shape=(TASK_OBS_DIM,),    # task_obs + proprioceptive_obs
+        #         dtype=np.float32)
         observation_space['rgb'] = gym.spaces.Box(
                 low=-1.0, high=+1.0,
                 shape=(IMG_HEIGHT, IMG_WIDTH, 3),
@@ -76,27 +77,27 @@ class NavigateGibsonEnv(iGibsonEnv):
         state, reward, done, info = super(NavigateGibsonEnv, self).step(action)
 
         custom_state = OrderedDict()
-        custom_state['task_obs'] = np.concatenate([
-                        self.task.get_task_obs(self)[:-2], # goal x,y relative distance
-                        self.robots[0].calc_state(),    # proprioceptive state
-                    ], 0)
+        # custom_state['task_obs'] = np.concatenate([
+        #                 self.task.get_task_obs(self)[:-2], # goal x,y relative distance
+        #                 self.robots[0].calc_state(),    # proprioceptive state
+        #             ], 0)
         custom_state['rgb'] = state['rgb']  # [0, 1] range rgb image
 
         return custom_state, reward, done, info
 
     def reset(self):
         if np.random.uniform() < 0.5:
-            self.task.target_pos = np.array([0.3, 0.9, 0.0])
+            self.task.target_pos = np.array([0.3, 0.9, 0.0])# np.array([-0.5, 0.9, 0.0])
         else:
-            self.task.target_pos = np.array([0.2, -0.2, 0.0])
+            self.task.target_pos = np.array([0.2, -0.2, 0.0])# np.array([-0.5, -0.2, 0.0])
 
         state = super(NavigateGibsonEnv, self).reset()
 
         custom_state = OrderedDict()
-        custom_state['task_obs'] = np.concatenate([
-                        self.task.get_task_obs(self)[:-2], # goal x,y relative distance
-                        self.robots[0].calc_state(),    # proprioceptive state
-                    ], 0)
+        # custom_state['task_obs'] = np.concatenate([
+        #                 self.task.get_task_obs(self)[:-2], # goal x,y relative distance
+        #                 self.robots[0].calc_state(),    # proprioceptive state
+        #             ], 0)
         custom_state['rgb'] = state['rgb']  # [0, 1] range rgb image
 
         return custom_state

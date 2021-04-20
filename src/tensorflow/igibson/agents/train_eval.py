@@ -479,8 +479,8 @@ def train_eval(
             if global_step_val % policy_checkpoint_interval == 0:
                 policy_checkpointer.save(global_step=global_step_val)
 
-            if global_step_val % rb_checkpoint_interval == 0:
-                rb_checkpointer.save(global_step=global_step_val)
+            # if global_step_val % rb_checkpoint_interval == 0:
+            #     rb_checkpointer.save(global_step=global_step_val)
         return train_loss
 
 
