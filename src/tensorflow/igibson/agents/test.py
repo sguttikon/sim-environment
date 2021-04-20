@@ -141,6 +141,24 @@ flags.DEFINE_float('physics_timestep', 1.0 / 40.0,
 flags.DEFINE_integer('gpu_g', 0,
                      'GPU id for graphics, e.g. Gibson.')
 
+# pfnet
+flags.DEFINE_string('pfnet_load', '', 'Load a previously trained pfnet model from a checkpoint file.')
+flags.DEFINE_integer('num_particles', 30,
+                     'Number of particles in Particle Filter.')
+flags.DEFINE_boolean('resample', False,
+                     'Resample particles in Particle Filter. Possible values: true / false.')
+flags.DEFINE_float('alpha_resample_ratio', 1.0,
+                    'Trade-off parameter for soft-resampling in PF-net. Only effective if resample == true. Assumes values 0.0 < alpha <= 1.0. Alpha equal to 1.0 corresponds to hard-resampling.')
+flags.DEFINE_integer('trajlen', 24, 'Length of trajectories.')
+flags.DEFINE_list('transition_std', [0.0, 0.0],
+                    'Standard deviations for transition model. Values: translation std (meters), rotation std (radians)')
+
+flags.DEFINE_list('global_map_size', [1000, 1000, 1], '')
+flags.DEFINE_float('window_scaler', 8.0, '')
+flags.DEFINE_boolean('return_state', True, '')
+flags.DEFINE_boolean('stateful', False, '')
+
+
 FLAGS = flags.FLAGS
 
 
@@ -224,15 +242,15 @@ def train_eval(
 
         tf_py_env = [lambda model_id=model_ids[i]: env_load_fn(model_id, 'headless', gpu)
                      for i in range(num_parallel_environments)]
-        tf_env = tf_py_environment.TFPyEnvironment(
-            parallel_py_environment.ParallelPyEnvironment(tf_py_env))
+        tf_env = tf_py_environment.TFPyEnvironment(tf_py_env[0])
+            #parallel_py_environment.ParallelPyEnvironment(tf_py_env))
 
         if eval_env_mode == 'gui':
             assert num_parallel_environments_eval == 1, 'only one GUI env is allowed'
         eval_py_env = [lambda model_id=model_ids_eval[i]: env_load_fn(model_id, eval_env_mode, gpu)
                        for i in range(num_parallel_environments_eval)]
-        eval_tf_env = tf_py_environment.TFPyEnvironment(
-            parallel_py_environment.ParallelPyEnvironment(eval_py_env))
+        eval_tf_env = tf_py_environment.TFPyEnvironment(eval_py_env[0])
+            #parallel_py_environment.ParallelPyEnvironment(eval_py_env))
 
         time_step_spec = tf_env.time_step_spec()
         observation_spec = time_step_spec.observation
