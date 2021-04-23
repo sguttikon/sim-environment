@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from utils.localize_env import LocalizeGibsonEnv
 from utils.navigate_env import NavigateGibsonEnv
 import os
 
@@ -40,7 +41,7 @@ def load(config_file,
          gym_env_wrappers=(),
          env_wrappers=(),
          spec_dtype_map=None):
-    env = NavigateGibsonEnv(config_file=config_file,
+    env = LocalizeGibsonEnv(config_file=config_file,
                      scene_id=model_id,
                      mode=env_mode,
                      action_timestep=action_timestep,
@@ -91,7 +92,7 @@ def wrap_env(env,
 
 if __name__ == '__main__':
     eval_py_env = load(
-        config_file=os.path.join('./configs/', 'turtlebot_navigate.yaml'),
+        config_file=os.path.join('./configs/', 'turtlebot_localize.yaml'),
         env_mode='gui',
         device_idx=0,
     )

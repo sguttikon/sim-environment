@@ -46,6 +46,7 @@ from absl import logging
 import gin
 from six.moves import range
 import tensorflow as tf  # pylint: disable=g-explicit-tensorflow-version-import
+import numpy as np
 
 import functools
 
@@ -124,7 +125,7 @@ flags.DEFINE_integer('gpu_c', 0,
                      'GPU id for compute, e.g. Tensorflow.')
 
 # Added for Gibson
-flags.DEFINE_string('config_file', os.path.join('./configs/', 'turtlebot_navigate.yaml'),
+flags.DEFINE_string('config_file', os.path.join('./configs/', 'turtlebot_localize.yaml'),
                     'Config file for the experiment.')
 flags.DEFINE_list('model_ids', None,
                   'A comma-separated list of model ids to overwrite config_file.'
@@ -143,6 +144,7 @@ flags.DEFINE_integer('gpu_g', 0,
 
 # pfnet
 flags.DEFINE_string('pfnet_load', '', 'Load a previously trained pfnet model from a checkpoint file.')
+flags.DEFINE_float('map_pixel_in_meters', 0.1, 'The width (and height) of a pixel of the map in meters. Defaults to 0.1 for iGibson environment [trav_map_resolution].')
 flags.DEFINE_integer('num_particles', 30,
                      'Number of particles in Particle Filter.')
 flags.DEFINE_boolean('resample', False,
@@ -152,20 +154,26 @@ flags.DEFINE_float('alpha_resample_ratio', 1.0,
 flags.DEFINE_integer('trajlen', 24, 'Length of trajectories.')
 flags.DEFINE_list('transition_std', [0.0, 0.0],
                     'Standard deviations for transition model. Values: translation std (meters), rotation std (radians)')
+flags.DEFINE_list('init_particles_std', [15, 0.523599], 'Standard deviations for generated initial particles for tracking distribution. Values: translation std (meters), rotation std (radians)')
+flags.DEFINE_string('init_particles_distr', 'gaussian', 'Distribution of initial particles. Possible values: gaussian / uniform.')
+flags.DEFINE_integer('gpu_num', '0', 'use gpu no. to train/test pfnet')
+flags.DEFINE_integer('seed', '42', 'Fix the random seed of numpy and tensorflow.')
 
 flags.DEFINE_list('global_map_size', [1000, 1000, 1], '')
 flags.DEFINE_float('window_scaler', 8.0, '')
 flags.DEFINE_boolean('return_state', True, '')
 flags.DEFINE_boolean('stateful', False, '')
-
+flags.DEFINE_boolean('use_plot', False, '')
+flags.DEFINE_boolean('store_plot', False, '')
+flags.DEFINE_list('init_particles_cov', [], '')
 
 FLAGS = flags.FLAGS
-
 
 @gin.configurable
 def train_eval(
     root_dir,
     gpu=0,
+    seed=42,
     env_load_fn=None,
     model_ids=None,
     reload_interval=None,
@@ -220,6 +228,10 @@ def train_eval(
     train_dir = os.path.join(root_dir, 'train')
     eval_dir = os.path.join(root_dir, 'eval')
 
+    # fix seed
+    np.random.seed(seed)
+    tf.random.set_seed(seed)
+
     eval_metrics = [
         tf_metrics.AverageReturnMetric(buffer_size=num_eval_episodes),
         tf_metrics.AverageEpisodeLengthMetric(buffer_size=num_eval_episodes)
@@ -240,23 +252,23 @@ def train_eval(
             assert len(model_ids_eval) == num_parallel_environments_eval, \
                 'model ids eval provided, but length not equal to num_parallel_environments_eval'
 
-        tf_py_env = [lambda model_id=model_ids[i]: env_load_fn(model_id, 'headless', gpu)
-                     for i in range(num_parallel_environments)]
-        tf_env = tf_py_environment.TFPyEnvironment(
-            # tf_py_env[0])
-            parallel_py_environment.ParallelPyEnvironment(tf_py_env))
+        # tf_py_env = [lambda model_id=model_ids[i]: env_load_fn(model_id, 'headless', gpu)
+        #              for i in range(num_parallel_environments)]
+        # tf_env = tf_py_environment.TFPyEnvironment(
+        #     tf_py_env[0])
+        #     # parallel_py_environment.ParallelPyEnvironment(tf_py_env))
 
         if eval_env_mode == 'gui':
             assert num_parallel_environments_eval == 1, 'only one GUI env is allowed'
         eval_py_env = [lambda model_id=model_ids_eval[i]: env_load_fn(model_id, eval_env_mode, gpu)
                        for i in range(num_parallel_environments_eval)]
         eval_tf_env = tf_py_environment.TFPyEnvironment(
-            # eval_py_env[0])
-            parallel_py_environment.ParallelPyEnvironment(eval_py_env))
+            eval_py_env[0])
+            # parallel_py_environment.ParallelPyEnvironment(eval_py_env))
 
-        time_step_spec = tf_env.time_step_spec()
+        time_step_spec = eval_tf_env.time_step_spec()
         observation_spec = time_step_spec.observation
-        action_spec = tf_env.action_spec()
+        action_spec = eval_tf_env.action_spec()
         print('observation_spec: ', observation_spec)
         print('action_spec: ', action_spec)
 
@@ -340,30 +352,31 @@ def train_eval(
             train_step_counter=global_step)
         tf_agent.initialize()
 
-        # Make the replay buffer.
-        replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
-            data_spec=tf_agent.collect_data_spec,
-            batch_size=tf_env.batch_size,
-            max_length=replay_buffer_capacity)
-        replay_observer = [replay_buffer.add_batch]
+        # # Make the replay buffer.
+        # replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
+        #     data_spec=tf_agent.collect_data_spec,
+        #     batch_size=tf_env.batch_size,
+        #     max_length=replay_buffer_capacity)
+        # replay_observer = [replay_buffer.add_batch]
 
         if eval_deterministic:
             eval_policy = greedy_policy.GreedyPolicy(tf_agent.policy)
         else:
             eval_policy = tf_agent.policy
 
-        train_metrics = [
-            tf_metrics.NumberOfEpisodes(),
-            tf_metrics.EnvironmentSteps(),
-            tf_metrics.AverageReturnMetric(
-                buffer_size=100, batch_size=tf_env.batch_size),
-            tf_metrics.AverageEpisodeLengthMetric(
-                buffer_size=100, batch_size=tf_env.batch_size),
-        ]
-
-        initial_collect_policy = random_tf_policy.RandomTFPolicy(
-            tf_env.time_step_spec(), tf_env.action_spec())
-        collect_policy = tf_agent.collect_policy
+        train_metrics = []
+        # train_metrics = [
+        #     tf_metrics.NumberOfEpisodes(),
+        #     tf_metrics.EnvironmentSteps(),
+        #     tf_metrics.AverageReturnMetric(
+        #         buffer_size=100, batch_size=tf_env.batch_size),
+        #     tf_metrics.AverageEpisodeLengthMetric(
+        #         buffer_size=100, batch_size=tf_env.batch_size),
+        # ]
+        #
+        # initial_collect_policy = random_tf_policy.RandomTFPolicy(
+        #     tf_env.time_step_spec(), tf_env.action_spec())
+        # collect_policy = tf_agent.collect_policy
 
         train_checkpointer = common.Checkpointer(
             ckpt_dir=train_dir,
@@ -384,10 +397,13 @@ def train_eval(
 
     for _ in range(num_eval_episodes):
         time_step = eval_tf_env.reset()
+        eval_tf_env.render('human')
         while not time_step.is_last():
             action_step = eval_policy.action(time_step)
             time_step = eval_tf_env.step(action_step.action)
+            eval_tf_env.render('human')
         print(time_step.reward)
+    eval_tf_env.close()
 
 def main(_):
     tf.compat.v1.enable_v2_behavior()
@@ -422,6 +438,7 @@ def main(_):
     train_eval(
         root_dir=FLAGS.root_dir,
         gpu=FLAGS.gpu_g,
+        seed=FLAGS.seed,
         env_load_fn=lambda model_id, mode, device_idx: suite_gibson.load(
             config_file=config_file,
             model_id=model_id,

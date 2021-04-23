@@ -217,3 +217,16 @@ April 14th 2021
 1. decrease even further goal positions
 2. increase episode length to 1000
 3. increase linear layer capacity
+
+April 21th 2021
+---------------
+1. use random actions as baseline to compare against trained rl agent
+2. start with mean gaussian particles and concatenate mean and variance to obs features -> need improvision
+3. train rl agent:
+    1. fixed starting position with uniform distributed particles -> need inprovision
+    2. reward mse gt pose and mean est pose (from particles) or -ve log likelihood
+    3. fixed episode steps budget say 500
+    4. (optional) stopping condition based on gaussian covariance /entropy threshold
+----
+4. if above works, random starting position
+5. particle encoding + complementary floor map

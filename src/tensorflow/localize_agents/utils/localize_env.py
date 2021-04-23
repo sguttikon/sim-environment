@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+from absl import flags
+from collections import OrderedDict
+from pathlib import Path
+
 import sys
 def set_path(path: str):
     try:
@@ -8,7 +12,7 @@ def set_path(path: str):
         sys.path.insert(0, path)
 
 from matplotlib.backends.backend_agg import FigureCanvasAgg
-from utils import render, datautils, arguments, pfnet_loss
+from utils import render, datautils, pfnet_loss
 from gibson2.utils.assets_utils import get_scene_path
 from gibson2.envs.igibson_env import iGibsonEnv
 import matplotlib.pyplot as plt
@@ -27,38 +31,71 @@ import pfnet
 
 class LocalizeGibsonEnv(iGibsonEnv):
 
-    def __init__(self, params):
+    def __init__(
+        self,
+        config_file,
+        scene_id=None,
+        mode='headless',
+        action_timestep=1 / 10.0,
+        physics_timestep=1 / 240.0,
+        device_idx=0,
+        render_to_tensor=False,
+        automatic_reset=False,
+    ):
 
-        self.params = params
+        super(LocalizeGibsonEnv, self).__init__(config_file=config_file,
+                        scene_id=scene_id,
+                        mode=mode,
+                        action_timestep=action_timestep,
+                        physics_timestep=physics_timestep,
+                        device_idx=device_idx,
+                        render_to_tensor=render_to_tensor,
+                        automatic_reset=automatic_reset)
+
+        # manually remove point navigation task termination and reward conditions
+        del self.task.termination_conditions[-1]
+        del self.task.reward_functions[-1]
+
+        observation_space = OrderedDict()
+        IMG_WIDTH = 56
+        IMG_HEIGHT = 56
+        TASK_OBS_DIM = 20
+
+        # observation_space['task_obs'] = gym.spaces.Box(
+        #         low=-np.inf, high=+np.inf,
+        #         shape=(TASK_OBS_DIM,),    # task_obs + proprioceptive_obs
+        #         dtype=np.float32)
+        observation_space['rgb'] = gym.spaces.Box(
+                low=-1.0, high=+1.0,
+                shape=(IMG_HEIGHT, IMG_WIDTH, 3),
+                dtype=np.float32)
+
+        self.observation_space = gym.spaces.Dict(observation_space)
+        print("=====> LocalizeiGibsonEnv initialized")
+
+        self.params = flags.FLAGS
+
+        # build initial covariance matrix of particles, in pixels and radians
+        particle_std = self.params.init_particles_std.copy()
+        # particle_std[0] = particle_std[0] / params.map_pixel_in_meters  # convert meters to pixels
+        particle_std2 = np.square(particle_std)  # variance
+        self.params.init_particles_cov = np.diag(particle_std2[(0, 0, 1),])
+
+        self.params.trajlen = 1
+        self.params.batch_size = 1
+
+        root_dir = os.path.expanduser(self.params.root_dir)
+        self.out_folder = os.path.join(root_dir, 'episode_runs')
+        Path(self.out_folder).mkdir(parents=True, exist_ok=True)
 
         # create pf model
         self.pfnet_model = pfnet.pfnet_model(self.params)
+        print("=====> PFNet initialized")
 
         # load model from checkpoint file
         if self.params.pfnet_load:
             self.pfnet_model.load_weights(self.params.pfnet_load)
-            print("=====> Loaded pf model from " + params.pfnet_load)
-
-        super(LocalizeGibsonEnv, self).__init__(config_file=self.params.config_filename,
-                        scene_id=None,
-                        mode=self.params.mode,
-                        action_timestep=1/10.0,
-                        physics_timestep=1/240.0,
-                        device_idx=self.params.gpu_num,
-                        render_to_tensor=False,
-                        automatic_reset=False)
-
-        output_size = 18 + np.prod((56, 56, 3))
-
-        # override
-        self.observation_space = gym.spaces.Box(
-                low=-np.inf, high=np.inf,
-                shape=(output_size, ),
-                dtype=np.float32)
-        self.task.termination_conditions[0].max_collisions_allowed = self.params.max_step
-        self.task.termination_conditions[1].max_step = self.params.max_step
-
-        print("=====> iGibsonEnv initialized")
+            print("=====> Loaded pf model from " + self.params.pfnet_load)
 
         if self.params.use_plot:
             # code related to displaying results in matplotlib
@@ -113,7 +150,7 @@ class LocalizeGibsonEnv(iGibsonEnv):
 
     def step(self, action):
 
-        trajlen = 1
+        trajlen = self.params.trajlen
         batch_size = self.params.batch_size
         num_particles = self.params.num_particles
 
@@ -125,11 +162,13 @@ class LocalizeGibsonEnv(iGibsonEnv):
         # perform env step
         state, reward, done, info = super(LocalizeGibsonEnv, self).step(action)
 
+        custom_state = OrderedDict()
+        # process new robot state
+        robot_state = self.robots[0].calc_state()
+
         # process new env observation
         rgb = datautils.process_raw_image(state['rgb'])
-
-        robot_state = self.robots[0].calc_state()
-        custom_state = np.concatenate([robot_state, np.reshape(rgb, [-1])], 0)
+        custom_state['rgb'] = rgb  # [-1, +1] range rgb image
 
         # process new robot state
         new_pose = self.get_robot_pose(robot_state, floor_map.shape)
@@ -216,11 +255,13 @@ class LocalizeGibsonEnv(iGibsonEnv):
         # perform env reset
         state = super(LocalizeGibsonEnv, self).reset()
 
+        custom_state = OrderedDict()
+        # process new robot state
+        robot_state = self.robots[0].calc_state()
+
         # process new env observation
         rgb = datautils.process_raw_image(state['rgb'])
-
-        robot_state = self.robots[0].calc_state()
-        custom_state = np.concatenate([robot_state, np.reshape(rgb, [-1])], 0)
+        custom_state['rgb'] = rgb  # [-1, +1] range rgb image
 
         # process new env map
         floor_map = self.get_floor_map()
@@ -508,11 +549,12 @@ class LocalizeGibsonEnv(iGibsonEnv):
         if len(self.plt_images) > 0:
             fps = 30
             frameSize = (self.plt_images[0].shape[0], self.plt_images[0].shape[1])
-            out = cv2.VideoWriter(
-                    self.params.out_folder + f'episode_run_{self.current_episode}.avi',
+            file_path = os.path.join(self.out_folder, f'episode_run_{self.current_episode}.avi')
+            out = cv2.VideoWriter(file_path,
                     cv2.VideoWriter_fourcc(*'XVID'),
                     fps, frameSize)
 
             for img in self.plt_images:
                 out.write(img)
             out.release()
+            print(f'stored results to {file_path}')
