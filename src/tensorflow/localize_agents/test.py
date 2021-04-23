@@ -156,15 +156,15 @@ flags.DEFINE_list('transition_std', [0.0, 0.0],
                     'Standard deviations for transition model. Values: translation std (meters), rotation std (radians)')
 flags.DEFINE_list('init_particles_std', [15, 0.523599], 'Standard deviations for generated initial particles for tracking distribution. Values: translation std (meters), rotation std (radians)')
 flags.DEFINE_string('init_particles_distr', 'gaussian', 'Distribution of initial particles. Possible values: gaussian / uniform.')
-flags.DEFINE_integer('gpu_num', '0', 'use gpu no. to train/test pfnet')
+# flags.DEFINE_integer('gpu_num', '0', 'use gpu no. to train/test pfnet')
 flags.DEFINE_integer('seed', '42', 'Fix the random seed of numpy and tensorflow.')
 
 flags.DEFINE_list('global_map_size', [1000, 1000, 1], '')
 flags.DEFINE_float('window_scaler', 8.0, '')
 flags.DEFINE_boolean('return_state', True, '')
 flags.DEFINE_boolean('stateful', False, '')
-flags.DEFINE_boolean('use_plot', False, '')
-flags.DEFINE_boolean('store_plot', False, '')
+flags.DEFINE_boolean('use_plot', True, '')
+flags.DEFINE_boolean('store_plot', True, '')
 flags.DEFINE_list('init_particles_cov', [], '')
 
 FLAGS = flags.FLAGS

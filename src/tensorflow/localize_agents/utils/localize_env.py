@@ -287,7 +287,7 @@ class LocalizeGibsonEnv(iGibsonEnv):
                                     num_particles,
                                     particles_distr,
                                     true_pose.numpy(),
-                                    floor_map,
+                                    floor_map[0],
                                     particles_cov)
                             , dtype=tf.float32)
         init_particle_weights = tf.constant(
@@ -404,7 +404,7 @@ class LocalizeGibsonEnv(iGibsonEnv):
                 b_particles = []
 
                 # get bounding box for more efficient sampling
-                # rmin, rmax, cmin, cmax = self.bounding_box(self.floor_map)
+                # rmin, rmax, cmin, cmax = self.bounding_box(scene_map)
                 rmin, rmax, cmin, cmax = self.bounding_box(scene_map, robot_pose[b_idx], lmt=100)
 
                 while sample_i < num_particles:
