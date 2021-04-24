@@ -41,7 +41,7 @@ def load(config_file,
          gym_env_wrappers=(),
          env_wrappers=(),
          spec_dtype_map=None):
-    env = LocalizeGibsonEnv(config_file=config_file,
+    env = NavigateGibsonEnv(config_file=config_file,
                      scene_id=model_id,
                      mode=env_mode,
                      action_timestep=action_timestep,

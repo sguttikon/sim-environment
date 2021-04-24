@@ -11,9 +11,18 @@ import numpy as np
 from tqdm import tqdm
 from agents import SACAgent
 import matplotlib.pyplot as plt
-from gibson2.envs.igibson_env import iGibsonEnv
-
 import tensorflow as tf
+
+import sys
+def set_path(path: str):
+    try:
+        sys.path.index(path)
+    except ValueError:
+        sys.path.insert(0, path)
+# path to custom tf_agents
+set_path('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src/tensorflow/stanford/agents')
+# set_path('/home/guttikon/awesome_robotics/sim-environment/src/tensorflow/stanford/agents')
+
 from tf_agents.agents.sac import tanh_normal_projection_network
 from tf_agents.environments import gym_wrapper
 from tf_agents.environments import py_environment
@@ -28,65 +37,7 @@ from tf_agents.train import actor
 from tf_agents.train import learner
 from tf_agents.train import triggers
 from tf_agents.train.utils import spec_utils
-
-import sys
-def set_path(path: str):
-    try:
-        sys.path.index(path)
-    except ValueError:
-        sys.path.insert(0, path)
-set_path('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src/tensorflow/igibson')
-# set_path('/home/guttikon/awesome_robotics/sim-environment/src/tensorflow/igibson')
-from utils import datautils
-
-IMG_WIDTH = 56
-IMG_HEIGHT = 56
-
-class NavigateGibsonEnv(iGibsonEnv):
-
-    def __init__(
-        self,
-        config_file,
-        scene_id=None,
-        mode='headless',
-        action_timestep=1 / 10.0,
-        physics_timestep=1 / 240.0,
-        device_idx=0,
-        render_to_tensor=False,
-        automatic_reset=False,
-    ):
-
-        super(NavigateGibsonEnv, self).__init__(config_file=config_file,
-                        scene_id=scene_id,
-                        mode=mode,
-                        action_timestep=action_timestep,
-                        physics_timestep=physics_timestep,
-                        device_idx=device_idx,
-                        render_to_tensor=render_to_tensor,
-                        automatic_reset=automatic_reset)
-
-        self.observation_space = gym.spaces.Box(
-                low=-1., high=+1.,
-                shape=(IMG_HEIGHT, IMG_WIDTH, 3),
-                dtype=np.float32)
-
-    def step(self, action):
-        state, reward, done, info = super(NavigateGibsonEnv, self).step(action)
-
-        # process image for training
-        rgb = datautils.process_raw_image(state['rgb'])
-        assert -1. <= np.min(rgb) and  np.max(rgb) <= +1.
-
-        return rgb, reward, done, info
-
-    def reset(self):
-        state = super(NavigateGibsonEnv, self).reset()
-
-        # process image for training
-        rgb = datautils.process_raw_image(state['rgb'])
-        assert -1. <= np.min(rgb) and  np.max(rgb) <= +1.
-
-        return rgb
+import suite_gibson
 
 # metrics
 def get_eval_metrics(actor):
@@ -103,28 +54,37 @@ def log_eval_metrics(step, metrics):
 
 def train_sac(params):
 
-    config_filename = os.path.join('../configs/', 'turtlebot_navigate.yaml')
-    collect_env = NavigateGibsonEnv(
-                    config_file=config_filename,
-                    mode='headless',
-                    action_timestep=1.0 / 120.0,
-                    physics_timestep=1.0 / 120.0
-    )
-    # eval_env = NavigateGibsonEnv(
-    #                 config_file=config_filename,
-    #                 mode='headless',
-    #                 action_timestep=1.0 / 120.0,
-    #                 physics_timestep=1.0 / 120.0)
+    collect_py_env = suite_gibson.load(config_file=params.config_file,
+                     model_id=None,
+                     env_mode='headless',
+                     device_idx=0)
+    # collect_env = tf_py_environment.TFPyEnvironment(collect_env)
 
-    # wrap iGibsonEnv to PyEnvironment
-    collect_py_env = gym_wrapper.GymWrapper(collect_env)
-    eval_py_env = collect_py_env # gym_wrapper.GymWrapper(eval_env)
+    eval_py_env = suite_gibson.load(config_file=params.config_file,
+                     model_id=None,
+                     env_mode='headless',
+                     device_idx=0)
     assert isinstance(collect_py_env, py_environment.PyEnvironment)
     assert isinstance(eval_py_env, py_environment.PyEnvironment)
 
-    sac = SACAgent()
-    tf_agent = sac.tf_agent
-    train_step = sac.train_step
+    # get environment specs
+    observation_spec, action_spec, time_step_spec = (
+            spec_utils.get_tensor_specs(collect_py_env)
+    )
+    print('Observation Spec:', observation_spec)
+    print('Action Spec:', action_spec)
+
+    sac_agent = SACAgent(observation_spec, action_spec, time_step_spec)
+    tf_agent = sac_agent.tf_agent
+    train_step = sac_agent.train_step
+
+    # policies
+    eval_policy = sac_agent.eval_policy
+    collect_policy = sac_agent.collect_policy
+    random_policy = random_py_policy.RandomPyPolicy(
+                            time_step_spec=collect_py_env.time_step_spec(),
+                            action_spec=collect_py_env.action_spec())
+    tf_policy_saver = policy_saver.PolicySaver(sac_agent.tf_agent.policy)
 
     # Replay Buffer
     table_name = 'uniform_table'
@@ -149,15 +109,6 @@ def train_sac(params):
         num_steps=params.sequence_length
     ).prefetch(50)
     experience_dataset_fn = lambda: dataset
-
-    # Policies
-    eval_policy = sac.eval_policy
-    collect_policy = sac.collect_policy
-    random_policy = random_py_policy.RandomPyPolicy(
-            time_step_spec=collect_py_env.time_step_spec(),
-            action_spec=collect_py_env.action_spec()
-    )
-    tf_policy_saver = policy_saver.PolicySaver(sac.tf_agent.policy)
 
     # Actor
     # trajectories as [t0, t1, t2, t3], [t1, t2, t3, t4], ....
@@ -229,7 +180,7 @@ def train_sac(params):
     returns = [avg_return]
 
     print('training started')
-    for _ in tqdm(range(params.num_iterations)):
+    for _ in range(params.num_iterations):
         # train
         collect_actor.run()
         loss_info = agent_learner.run(iterations=1)
@@ -262,26 +213,46 @@ def train_sac(params):
 
 def test_sac(params):
 
-    # wrap iGibsonEnv to PyEnvironment
-    config_filename = os.path.join('../configs/', 'turtlebot_navigate.yaml')
-    eval_env = NavigateGibsonEnv(
-                    config_file=config_filename,
-                    mode='headless',
-                    action_timestep=1.0 / 120.0,
-                    physics_timestep=1.0 / 120.0
-    )
-    eval_py_env = gym_wrapper.GymWrapper(eval_env)
+    eval_py_env = suite_gibson.load(config_file=params.config_file,
+                     model_id=None,
+                     env_mode='headless',
+                     device_idx=0)
     assert isinstance(eval_py_env, py_environment.PyEnvironment)
     eval_tf_env = tf_py_environment.TFPyEnvironment(eval_py_env)
 
-    policy_dir = './runs/20210322-162208/output'
-    saved_policy = tf.compat.v2.saved_model.load(policy_dir)
+    # get environment specs
+    observation_spec, action_spec, time_step_spec = (
+            spec_utils.get_tensor_specs(eval_py_env)
+    )
+    print('Observation Spec:', observation_spec)
+    print('Action Spec:', action_spec)
+
+    sac_agent = SACAgent(observation_spec, action_spec, time_step_spec)
+    tf_agent = sac_agent.tf_agent
+    train_step = sac_agent.train_step
+
+    # policies
+    eval_policy = sac_agent.eval_policy
+    collect_policy = sac_agent.collect_policy
+    random_policy = random_py_policy.RandomPyPolicy(
+                            time_step_spec=eval_py_env.time_step_spec(),
+                            action_spec=eval_py_env.action_spec())
+
+    # policy_dir = './runs/20210424-104538/output'
+    # saved_policy = tf.compat.v2.saved_model.load(policy_dir)
+    tf_agent.policy.restore(policy_dir='/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src/tensorflow/localize_agents/runs/20210424-104538/policies/policy')
+
+    policy_checkpointer = common.Checkpointer(
+        ckpt_dir=os.path.join(train_dir, 'policy'),
+        policy=eval_policy,
+        global_step=global_step)
+    policy_checkpointer.initialize_or_restore()
 
     num_episodes = 3
     for _ in range(num_episodes):
         time_step = eval_tf_env.reset()
         while not time_step.is_last():
-            action_step = saved_policy.action(time_step)
+            action_step = eval_policy.action(time_step)
             time_step = eval_tf_env.step(action_step.action)
 
 def parse_args():
@@ -293,6 +264,7 @@ def parse_args():
 
     argparser = argparse.ArgumentParser()
 
+    argparser.add_argument('--config_file', type=str, default=os.path.join('./configs/', 'turtlebot_navigate.yaml'))
     argparser.add_argument('--num_iterations', type=int, default=1e6)
 
     argparser.add_argument('--initial_collect_steps', type=int, default=1e4)

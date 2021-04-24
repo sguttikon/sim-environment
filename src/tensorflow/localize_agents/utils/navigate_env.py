@@ -1,9 +1,21 @@
 #!/usr/bin/env python3
 
+import argparse
 from collections import OrderedDict
 from gibson2.envs.igibson_env import iGibsonEnv
-import numpy as np
 import gym
+import numpy as np
+
+import sys
+def set_path(path: str):
+    try:
+        sys.path.index(path)
+    except ValueError:
+        sys.path.insert(0, path)
+# set programatically the path to 'pfnet' directory (alternately can also set PYTHONPATH)
+set_path('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src/tensorflow/pfnet')
+# set_path('/home/guttikon/awesome_robotics/sim-environment/src/tensorflow/pfnet')
+import pfnet
 
 class NavigateGibsonEnv(iGibsonEnv):
 
@@ -42,6 +54,34 @@ class NavigateGibsonEnv(iGibsonEnv):
                 dtype=np.float32)
 
         self.observation_space = gym.spaces.Dict(observation_space)
+
+        # create pf model
+        argparser = argparse.ArgumentParser()
+        self.pf_params = argparser.parse_args([])
+        self.pf_params.map_pixel_in_meters = 0.1
+        self.pf_params.init_particles_distr = 'uniform'
+        self.pf_params.init_particles_std = np.array([15, 0.523599], dtype=np.float32)
+        self.pf_params.trajlen = 1
+        self.pf_params.num_particles = 100
+        self.pf_params.transition_std = np.array([0., 0.], dtype=np.float32)
+        self.pf_params.resample = True
+        self.pf_params.alpha_resample_ratio = 1.
+        self.pf_params.batch_size = 1
+        self.pf_params.gpu_num = 0
+
+        # build initial covariance matrix of particles, in pixels and radians
+        particle_std = self.pf_params.init_particles_std.copy()
+        # particle_std[0] = particle_std[0] / params.map_pixel_in_meters  # convert meters to pixels
+        particle_std2 = np.square(particle_std)  # variance
+        self.pf_params.init_particles_cov = np.diag(particle_std2[(0, 0, 1),])
+
+        self.pf_params.stateful = False
+        self.pf_params.return_state = True
+        self.pf_params.global_map_size = (1000, 1000, 1)
+        self.pf_params.window_scaler = 8.0
+
+        self.pfnet_model = pfnet.pfnet_model(self.pf_params)
+        print("=====> PFNet initialized")
 
     def step(self, action):
         state, reward, done, info = super(NavigateGibsonEnv, self).step(action)

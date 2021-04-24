@@ -1,46 +1,44 @@
 #!/usr/bin/env python3
 
 import numpy as np
-
 import tensorflow as tf
-from tensorflow.python.framework.tensor_spec import BoundedTensorSpec
-from tensorflow.python.framework.tensor_spec import TensorSpec
+
+import sys
+def set_path(path: str):
+    try:
+        sys.path.index(path)
+    except ValueError:
+        sys.path.insert(0, path)
+# path to custom tf_agents
+set_path('/media/suresh/research/awesome-robotics/active-slam/catkin_ws/src/sim-environment/src/tensorflow/stanford/agents')
+# set_path('/home/guttikon/awesome_robotics/sim-environment/src/tensorflow/stanford/agents')
+
+
 from tf_agents.agents.ddpg import critic_network
 from tf_agents.agents.sac import sac_agent
+from tf_agents.agents.sac import tanh_normal_projection_network
 from tf_agents.networks import actor_distribution_network
-from tf_agents.networks import normal_projection_network
+from tf_agents.networks.utils import mlp_layers
 from tf_agents.policies import py_tf_eager_policy
 from tf_agents.train.utils import strategy_utils
 from tf_agents.train.utils import train_utils
-from tf_agents.trajectories.time_step import TimeStep
-
-IMG_WIDTH = 56
-IMG_HEIGHT = 56
-
-def normal_projection_net(
-    action_spec,
-    init_action_stddev=0.35,
-    init_means_output_factor=0.1
-):
-    return normal_projection_network.NormalProjectionNetwork(
-        sample_spec=action_spec,
-        init_means_output_factor=init_means_output_factor,
-        mean_transform=None,
-        std_transform=sac_agent.std_clip_transform,
-        state_dependent_std=True,
-        scale_distribution=True
-    )
 
 class SACAgent(object):
 
     def __init__(
         self,
+        # env specs
+        observation_spec,
+        action_spec,
+        time_step_spec,
         # for network construction
-        actor_fc_layers = [256, 256],
-        critic_joint_fc_layers = [256, 256],
-        critic_obs_fc_layers = [256, 256],
-        critic_action_fc_layers = [256, 256],
-        conv_layers=[(32, (8, 8), 4), (64, (4, 4), 2), (64, (3, 3), 2)],
+        conv_1d_layer_params = [(32, 8, 4), (64, 4, 2), (64, 3, 1)],
+        conv_2d_layer_params = [(32, (8, 8), 4), (64, (4, 4), 2), (64, (3, 3), 2)],
+        encoder_fc_layers = [256],
+        actor_fc_layers = [256],
+        critic_obs_fc_layers = [256],
+        critic_action_fc_layers = [256],
+        critic_joint_fc_layers = [256],
         # for training
         actor_learning_rate=3e-4,
         critic_learning_rate=3e-4,
@@ -52,49 +50,54 @@ class SACAgent(object):
         reward_scale_factor=1.0,
     ):
 
-        # initialize time_step_spec, observation_spec, action_spec
-        time_step_spec = TimeStep(
-            step_type=TensorSpec(
-                shape=(),
-                dtype=tf.int32,
-                name='step_type'
-            ),
-            reward=TensorSpec(
-                shape=(),
-                dtype=tf.float32,
-                name='reward'
-            ),
-            discount=BoundedTensorSpec(
-                shape=(),
-                dtype=tf.float32,
-                name='discount',
-                minimum=np.array(0., dtype=np.float32),
-                maximum=np.array(1., dtype=np.float32)
-            ),
-            observation=BoundedTensorSpec(
-                shape=(IMG_HEIGHT, IMG_WIDTH, 3),
-                dtype=tf.float32,
-                name='observation',
-                minimum=np.array(-1., dtype=np.float32),
-                maximum=np.array(+1., dtype=np.float32)
-            ),
-        )
-        observation_spec = time_step_spec.observation
-        action_spec = BoundedTensorSpec(
-            shape=(2,),
-            dtype=tf.float32,
-            name='action',
-            minimum=np.array(-1., dtype=np.float32),
-            maximum=np.array(+1., dtype=np.float32)
-        )
-
         strategy = strategy_utils.get_strategy(tpu=False, use_gpu=True)
+
+        # initialize preprocessing_layers and preprocessing_combiner for critic/actor networks
+        with strategy.scope():
+            preprocessing_layers = {}
+            if 'rgb' in observation_spec:
+                preprocessing_layers['rgb'] = tf.keras.Sequential(mlp_layers(
+                    conv_1d_layer_params=None,
+                    conv_2d_layer_params=conv_2d_layer_params,
+                    fc_layer_params=encoder_fc_layers,
+                    kernel_initializer='glorot_uniform',
+                ))
+
+            if 'depth' in observation_spec:
+                preprocessing_layers['depth'] = tf.keras.Sequential(mlp_layers(
+                    conv_1d_layer_params=None,
+                    conv_2d_layer_params=conv_2d_layer_params,
+                    fc_layer_params=encoder_fc_layers,
+                    kernel_initializer='glorot_uniform',
+                ))
+
+            if 'scan' in observation_spec:
+                preprocessing_layers['scan'] = tf.keras.Sequential(mlp_layers(
+                    conv_1d_layer_params=conv_1d_layer_params,
+                    conv_2d_layer_params=None,
+                    fc_layer_params=encoder_fc_layers,
+                    kernel_initializer='glorot_uniform',
+                ))
+
+            if 'task_obs' in observation_spec:
+                preprocessing_layers['task_obs'] = tf.keras.Sequential(mlp_layers(
+                    conv_1d_layer_params=None,
+                    conv_2d_layer_params=None,
+                    fc_layer_params=encoder_fc_layers,
+                    kernel_initializer='glorot_uniform',
+                ))
+
+            if len(preprocessing_layers) <= 1:
+                preprocessing_combiner = None
+            else:
+                preprocessing_combiner = tf.keras.layers.Concatenate(axis=-1)
 
         # Critic Network to estimate Q(s, a)
         with strategy.scope():
             critic_net = critic_network.CriticNetwork(
                 input_tensor_spec=(observation_spec, action_spec),
-                observation_conv_layer_params=conv_layers,
+                preprocessing_layers=preprocessing_layers,
+                preprocessing_combiner=preprocessing_combiner,
                 observation_fc_layer_params=critic_obs_fc_layers,
                 action_fc_layer_params=critic_action_fc_layers,
                 joint_fc_layer_params=critic_joint_fc_layers,
@@ -106,11 +109,10 @@ class SACAgent(object):
             actor_net = actor_distribution_network.ActorDistributionNetwork(
                 input_tensor_spec=observation_spec,
                 output_tensor_spec=action_spec,
-                # preprocessing_layers=None,
-                # preprocessing_combiner=None,
-                conv_layer_params=conv_layers,
+                preprocessing_layers=preprocessing_layers,
+                preprocessing_combiner=preprocessing_combiner,
                 fc_layer_params=actor_fc_layers,
-                continuous_projection_net=normal_projection_net,
+                continuous_projection_net=tanh_normal_projection_network.TanhNormalProjectionNetwork,
                 kernel_initializer='glorot_uniform',
             )
 
