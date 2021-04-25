@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
-from absl import flags
+from absl import logging
+import argparse
 from collections import OrderedDict
 from pathlib import Path
 
@@ -73,31 +74,48 @@ class LocalizeGibsonEnv(iGibsonEnv):
         self.observation_space = gym.spaces.Dict(observation_space)
         print("=====> LocalizeiGibsonEnv initialized")
 
-        self.params = flags.FLAGS
+        # create pf model
+        argparser = argparse.ArgumentParser()
+        self.pf_params = argparser.parse_args([])
+        self.pf_params.map_pixel_in_meters = 0.1
+        self.pf_params.init_particles_distr = 'uniform'
+        self.pf_params.init_particles_std = np.array([15, 0.523599], dtype=np.float32)
+        self.pf_params.trajlen = 1
+        self.pf_params.num_particles = 100
+        self.pf_params.transition_std = np.array([0., 0.], dtype=np.float32)
+        self.pf_params.resample = True
+        self.pf_params.alpha_resample_ratio = 1.
+        self.pf_params.batch_size = 1
+        self.pf_params.gpu_num = 0
+        self.pf_params.pfnet_load = ''
+        self.pf_params.root_dir = './'
+        self.pf_params.use_plot = False
+        self.pf_params.store_plot = False
 
         # build initial covariance matrix of particles, in pixels and radians
-        particle_std = self.params.init_particles_std.copy()
+        particle_std = self.pf_params.init_particles_std.copy()
         # particle_std[0] = particle_std[0] / params.map_pixel_in_meters  # convert meters to pixels
         particle_std2 = np.square(particle_std)  # variance
-        self.params.init_particles_cov = np.diag(particle_std2[(0, 0, 1),])
+        self.pf_params.init_particles_cov = np.diag(particle_std2[(0, 0, 1),])
 
-        self.params.trajlen = 1
-        self.params.batch_size = 1
+        self.pf_params.stateful = False
+        self.pf_params.return_state = True
+        self.pf_params.global_map_size = (1000, 1000, 1)
+        self.pf_params.window_scaler = 8.0
 
-        root_dir = os.path.expanduser(self.params.root_dir)
+        self.pfnet_model = pfnet.pfnet_model(self.pf_params)
+        print("=====> PFNet initialized")
+
+        root_dir = os.path.expanduser(self.pf_params.root_dir)
         self.out_folder = os.path.join(root_dir, 'episode_runs')
         Path(self.out_folder).mkdir(parents=True, exist_ok=True)
 
-        # create pf model
-        self.pfnet_model = pfnet.pfnet_model(self.params)
-        print("=====> PFNet initialized")
-
         # load model from checkpoint file
-        if self.params.pfnet_load:
-            self.pfnet_model.load_weights(self.params.pfnet_load)
-            print("=====> Loaded pf model from " + self.params.pfnet_load)
+        if self.pf_params.pfnet_load:
+            self.pfnet_model.load_weights(self.pf_params.pfnet_load)
+            print("=====> Loaded pf model from " + self.pf_params.pfnet_load)
 
-        if self.params.use_plot:
+        if self.pf_params.use_plot:
             # code related to displaying results in matplotlib
             self.fig = plt.figure(figsize=(7, 7))
             self.plt_ax = None
@@ -116,7 +134,7 @@ class LocalizeGibsonEnv(iGibsonEnv):
             }
 
             #HACK FigureCanvasAgg and ion is not working together
-            if self.params.store_plot:
+            if self.pf_params.store_plot:
                 self.canvas = FigureCanvasAgg(self.fig)
             else:
                 plt.ion()
@@ -150,9 +168,9 @@ class LocalizeGibsonEnv(iGibsonEnv):
 
     def step(self, action):
 
-        trajlen = self.params.trajlen
-        batch_size = self.params.batch_size
-        num_particles = self.params.num_particles
+        trajlen = self.pf_params.trajlen
+        batch_size = self.pf_params.batch_size
+        num_particles = self.pf_params.num_particles
 
         old_obs = self.robot_obs
         floor_map = self.floor_map[0]
@@ -201,7 +219,7 @@ class LocalizeGibsonEnv(iGibsonEnv):
 
         # if stateful: reset RNN s.t. initial_state is set to initial particles and weights
         # if non-stateful: pass the state explicity every step
-        if self.params.stateful:
+        if self.pf_params.stateful:
             self.pfnet_model.layers[-1].reset_states(old_pfnet_state)    # RNN layer
 
         # forward pass
@@ -214,7 +232,7 @@ class LocalizeGibsonEnv(iGibsonEnv):
         assert list(true_pose.shape) == [batch_size, trajlen, 3]
         assert list(particles.shape) == [batch_size, trajlen, num_particles, 3]
         assert list(particle_weights.shape) == [batch_size, trajlen, num_particles]
-        loss_dict = pfnet_loss.compute_loss(particles, particle_weights, true_pose, self.params.map_pixel_in_meters)
+        loss_dict = pfnet_loss.compute_loss(particles, particle_weights, true_pose, self.pf_params.map_pixel_in_meters)
 
         reward = reward - tf.squeeze(loss_dict['coords']).numpy() #
 
@@ -226,13 +244,13 @@ class LocalizeGibsonEnv(iGibsonEnv):
 
     def reset(self):
 
-        batch_size = self.params.batch_size
-        map_size = self.params.global_map_size
-        num_particles = self.params.num_particles
-        particles_cov = self.params.init_particles_cov
-        particles_distr = self.params.init_particles_distr
+        batch_size = self.pf_params.batch_size
+        map_size = self.pf_params.global_map_size
+        num_particles = self.pf_params.num_particles
+        particles_cov = self.pf_params.init_particles_cov
+        particles_distr = self.pf_params.init_particles_distr
 
-        if self.params.use_plot:
+        if self.pf_params.use_plot:
             #clear subplots
             plt.clf()
             self.plt_ax = self.fig.add_subplot(111)
@@ -322,8 +340,8 @@ class LocalizeGibsonEnv(iGibsonEnv):
         return robot_pose
 
     def get_est_pose(self, particles, lin_weights):
-        batch_size = self.params.batch_size
-        num_particles = self.params.num_particles
+        batch_size = self.pf_params.batch_size
+        num_particles = self.pf_params.num_particles
         assert list(particles.shape) == [batch_size, num_particles, 3]
         assert list(lin_weights.shape) == [batch_size, num_particles]
 
@@ -460,7 +478,7 @@ class LocalizeGibsonEnv(iGibsonEnv):
         """
         # super(LocalizeGibsonEnv, self).render(mode)
 
-        if self.params.use_plot:
+        if self.pf_params.use_plot:
             # environment map
             floor_map = self.floor_map[0].numpy()
             map_plt = self.env_plts['map_plt']
@@ -520,7 +538,7 @@ class LocalizeGibsonEnv(iGibsonEnv):
                                 self.env_plts['robot_est_plt']['position_plt']],
                             ["gt_pose", "est_pose"], loc='upper left')
 
-            if self.params.store_plot:
+            if self.pf_params.store_plot:
                 self.canvas.draw()
                 plt_img = np.array(self.canvas.renderer._renderer)
                 plt_img = cv2.cvtColor(plt_img, cv2.COLOR_RGB2BGR)
@@ -535,8 +553,8 @@ class LocalizeGibsonEnv(iGibsonEnv):
         """
         super(LocalizeGibsonEnv, self).close()
 
-        if self.params.use_plot:
-            if self.params.store_plot:
+        if self.pf_params.use_plot:
+            if self.pf_params.store_plot:
                 self.store_results()
             else:
                 # to prevent plot from closing after environment is closed
