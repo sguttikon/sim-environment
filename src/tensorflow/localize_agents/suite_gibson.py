@@ -92,7 +92,7 @@ def wrap_env(env,
 
 if __name__ == '__main__':
     eval_py_env = load(
-        config_file=os.path.join('./configs/', 'turtlebot_localize.yaml'),
+        config_file=os.path.join('./configs/', 'turtlebot_navigate.yaml'),
         env_mode='gui',
         device_idx=0,
     )
