@@ -44,14 +44,14 @@ class NavigateGibsonEnv(iGibsonEnv):
         IMG_HEIGHT = 56
         TASK_OBS_DIM = 20
 
-        # observation_space['task_obs'] = gym.spaces.Box(
-        #         low=-np.inf, high=+np.inf,
-        #         shape=(TASK_OBS_DIM,),    # task_obs + proprioceptive_obs
-        #         dtype=np.float32)
-        observation_space['rgb'] = gym.spaces.Box(
-                low=-1.0, high=+1.0,
-                shape=(IMG_HEIGHT, IMG_WIDTH, 3),
+        observation_space['task_obs'] = gym.spaces.Box(
+                low=-np.inf, high=+np.inf,
+                shape=(TASK_OBS_DIM,),    # task_obs + proprioceptive_obs
                 dtype=np.float32)
+        # observation_space['rgb'] = gym.spaces.Box(
+        #         low=-1.0, high=+1.0,
+        #         shape=(IMG_HEIGHT, IMG_WIDTH, 3),
+        #         dtype=np.float32)
 
         self.observation_space = gym.spaces.Dict(observation_space)
 
