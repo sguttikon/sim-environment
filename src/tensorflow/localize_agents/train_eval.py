@@ -178,7 +178,7 @@ def train_eval(
     gamma=0.99,
     reward_scale_factor=1.0,
     gradient_clipping=None,
-    use_tf_functions=False,
+    use_tf_functions=True,
     # Params for eval
     num_eval_episodes=30,
     eval_interval=10000,
@@ -317,7 +317,7 @@ def train_eval(
                 learning_rate=alpha_learning_rate),
             target_update_tau=target_update_tau,
             target_update_period=target_update_period,
-            # td_errors_loss_fn=td_errors_loss_fn,
+            td_errors_loss_fn=td_errors_loss_fn,
             gamma=gamma,
             reward_scale_factor=reward_scale_factor,
             gradient_clipping=gradient_clipping,
@@ -479,8 +479,8 @@ def train_eval(
             if global_step_val % policy_checkpoint_interval == 0:
                 policy_checkpointer.save(global_step=global_step_val)
 
-            # if global_step_val % rb_checkpoint_interval == 0:
-            #     rb_checkpointer.save(global_step=global_step_val)
+            if global_step_val % rb_checkpoint_interval == 0:
+                rb_checkpointer.save(global_step=global_step_val)
         return train_loss
 
 
