@@ -46,6 +46,7 @@ from absl import logging
 import gin
 from six.moves import range
 import tensorflow as tf  # pylint: disable=g-explicit-tensorflow-version-import
+import numpy as np
 
 import functools
 
@@ -178,7 +179,7 @@ def train_eval(
     gamma=0.99,
     reward_scale_factor=1.0,
     gradient_clipping=None,
-    use_tf_functions=True,
+    use_tf_functions=False,
     # Params for eval
     num_eval_episodes=30,
     eval_interval=10000,
@@ -231,16 +232,16 @@ def train_eval(
         tf_py_env = [lambda model_id=model_ids[i]: env_load_fn(model_id, 'headless', gpu)
                      for i in range(num_parallel_environments)]
         tf_env = tf_py_environment.TFPyEnvironment(
-            tf_py_env[0])
-            # parallel_py_environment.ParallelPyEnvironment(tf_py_env))
+            # tf_py_env[0])
+            parallel_py_environment.ParallelPyEnvironment(tf_py_env))
 
         if eval_env_mode == 'gui':
             assert num_parallel_environments_eval == 1, 'only one GUI env is allowed'
         eval_py_env = [lambda model_id=model_ids_eval[i]: env_load_fn(model_id, eval_env_mode, gpu)
                        for i in range(num_parallel_environments_eval)]
         eval_tf_env = tf_py_environment.TFPyEnvironment(
-            eval_py_env[0])
-            # parallel_py_environment.ParallelPyEnvironment(eval_py_env))
+            # eval_py_env[0])
+            parallel_py_environment.ParallelPyEnvironment(eval_py_env))
 
         time_step_spec = tf_env.time_step_spec()
         observation_spec = time_step_spec.observation
@@ -319,7 +320,7 @@ def train_eval(
                 learning_rate=alpha_learning_rate),
             target_update_tau=target_update_tau,
             target_update_period=target_update_period,
-            td_errors_loss_fn=td_errors_loss_fn,
+            # td_errors_loss_fn=td_errors_loss_fn,
             gamma=gamma,
             reward_scale_factor=reward_scale_factor,
             gradient_clipping=gradient_clipping,
@@ -558,5 +559,7 @@ def main(_):
 if __name__ == '__main__':
     flags.mark_flag_as_required('root_dir')
     flags.mark_flag_as_required('config_file')
+    np.random.seed(42)
+    tf.random.set_seed(42)
     multiprocessing.handle_main(functools.partial(app.run, main))
     app.run(main)
