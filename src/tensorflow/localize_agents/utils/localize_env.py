@@ -13,7 +13,7 @@ def set_path(path: str):
         sys.path.insert(0, path)
 
 from matplotlib.backends.backend_agg import FigureCanvasAgg
-from utils import render, datautils, pfnet_loss
+from . import render, datautils, pfnet_loss
 from gibson2.utils.assets_utils import get_scene_path
 from gibson2.envs.igibson_env import iGibsonEnv
 import matplotlib.pyplot as plt
@@ -60,12 +60,12 @@ class LocalizeGibsonEnv(iGibsonEnv):
         observation_space = OrderedDict()
         IMG_WIDTH = 56
         IMG_HEIGHT = 56
-        TASK_OBS_DIM = 20
+        TASK_OBS_DIM = 3 # 20
 
-        # observation_space['task_obs'] = gym.spaces.Box(
-        #         low=-np.inf, high=+np.inf,
-        #         shape=(TASK_OBS_DIM,),    # task_obs + proprioceptive_obs
-        #         dtype=np.float32)
+        observation_space['task_obs'] = gym.spaces.Box(
+                low=-np.inf, high=+np.inf,
+                shape=(TASK_OBS_DIM,),    # task_obs + proprioceptive_obs
+                dtype=np.float32)
         observation_space['rgb'] = gym.spaces.Box(
                 low=-1.0, high=+1.0,
                 shape=(IMG_HEIGHT, IMG_WIDTH, 3),
@@ -180,15 +180,13 @@ class LocalizeGibsonEnv(iGibsonEnv):
         # perform env step
         state, reward, done, info = super(LocalizeGibsonEnv, self).step(action)
 
-        custom_state = OrderedDict()
         # process new robot state
         robot_state = self.robots[0].calc_state()
 
         # process new env observation
-        rgb = datautils.process_raw_image(state['rgb'])
-        custom_state['rgb'] = rgb  # [-1, +1] range rgb image
+        rgb = datautils.process_raw_image(state['rgb']) # [-1, +1] range rgb image
 
-        # process new robot state
+        # process new robot state in pixel space
         new_pose = self.get_robot_pose(robot_state, floor_map.shape)
 
         # calculate actual odometry b/w old pose and new pose
@@ -234,11 +232,17 @@ class LocalizeGibsonEnv(iGibsonEnv):
         assert list(particle_weights.shape) == [batch_size, trajlen, num_particles]
         loss_dict = pfnet_loss.compute_loss(particles, particle_weights, true_pose, self.pf_params.map_pixel_in_meters)
 
+        # compute reward
         reward = reward - tf.squeeze(loss_dict['coords']).numpy() #
 
         self.pfnet_state = new_pfnet_state
         self.robot_pose = new_pose
         self.robot_obs = new_obs
+
+        # construct env state
+        custom_state = OrderedDict()
+        custom_state['rgb'] = rgb
+        custom_state['task_obs'] = self.get_est_pose()[0].numpy()
 
         return custom_state, reward, done, info
 
@@ -273,19 +277,17 @@ class LocalizeGibsonEnv(iGibsonEnv):
         # perform env reset
         state = super(LocalizeGibsonEnv, self).reset()
 
-        custom_state = OrderedDict()
         # process new robot state
         robot_state = self.robots[0].calc_state()
 
         # process new env observation
-        rgb = datautils.process_raw_image(state['rgb'])
-        custom_state['rgb'] = rgb  # [-1, +1] range rgb image
+        rgb = datautils.process_raw_image(state['rgb']) # [-1, +1] range rgb image
 
         # process new env map
         floor_map = self.get_floor_map()
         obstacle_map = self.get_obstacle_map()
 
-        # process new robot state
+        # process new robot state in pixel space
         true_pose = self.get_robot_pose(robot_state, floor_map.shape)
 
         obs = tf.expand_dims(
@@ -327,6 +329,11 @@ class LocalizeGibsonEnv(iGibsonEnv):
         self.robot_pose = true_pose
         self.robot_obs = obs
 
+        # construct env state
+        custom_state = OrderedDict()
+        custom_state['rgb'] = rgb
+        custom_state['task_obs'] = self.get_est_pose()[0].numpy()
+
         return custom_state
 
     def get_robot_pose(self, robot_state, floor_map_shape):
@@ -339,9 +346,13 @@ class LocalizeGibsonEnv(iGibsonEnv):
 
         return robot_pose
 
-    def get_est_pose(self, particles, lin_weights):
+    def get_est_pose(self):
+        # after transition update
+        particles, particle_weights, _ = self.pfnet_state
+        lin_weights = tf.nn.softmax(particle_weights, axis=-1)
         batch_size = self.pf_params.batch_size
         num_particles = self.pf_params.num_particles
+
         assert list(particles.shape) == [batch_size, num_particles, 3]
         assert list(lin_weights.shape) == [batch_size, num_particles]
 
@@ -505,7 +516,7 @@ class LocalizeGibsonEnv(iGibsonEnv):
 
             # estimated robot pose and heading
             color = '#515A5A'
-            est_pose = self.get_est_pose(particles, lin_weights)[0].numpy() + 10
+            est_pose = self.get_est_pose()[0].numpy()
             position_plt = self.env_plts['robot_est_plt']['position_plt']
             heading_plt = self.env_plts['robot_est_plt']['heading_plt']
             position_plt, heading_plt = render.draw_robot_pose(

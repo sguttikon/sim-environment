@@ -5,6 +5,7 @@ from collections import OrderedDict
 from gibson2.envs.igibson_env import iGibsonEnv
 import gym
 import numpy as np
+from . import render, datautils, pfnet_loss
 
 import sys
 def set_path(path: str):
@@ -44,54 +45,57 @@ class NavigateGibsonEnv(iGibsonEnv):
         IMG_HEIGHT = 56
         TASK_OBS_DIM = 20
 
-        observation_space['task_obs'] = gym.spaces.Box(
-                low=-np.inf, high=+np.inf,
-                shape=(TASK_OBS_DIM,),    # task_obs + proprioceptive_obs
-                dtype=np.float32)
-        # observation_space['rgb'] = gym.spaces.Box(
-        #         low=-1.0, high=+1.0,
-        #         shape=(IMG_HEIGHT, IMG_WIDTH, 3),
+        # observation_space['task_obs'] = gym.spaces.Box(
+        #         low=-np.inf, high=+np.inf,
+        #         shape=(TASK_OBS_DIM,),    # task_obs + proprioceptive_obs
         #         dtype=np.float32)
+        observation_space['rgb'] = gym.spaces.Box(
+                low=-1.0, high=+1.0,
+                shape=(IMG_HEIGHT, IMG_WIDTH, 3),
+                dtype=np.float32)
 
         self.observation_space = gym.spaces.Dict(observation_space)
 
-        # # create pf model
-        # argparser = argparse.ArgumentParser()
-        # self.pf_params = argparser.parse_args([])
-        # self.pf_params.map_pixel_in_meters = 0.1
-        # self.pf_params.init_particles_distr = 'uniform'
-        # self.pf_params.init_particles_std = np.array([15, 0.523599], dtype=np.float32)
-        # self.pf_params.trajlen = 1
-        # self.pf_params.num_particles = 100
-        # self.pf_params.transition_std = np.array([0., 0.], dtype=np.float32)
-        # self.pf_params.resample = True
-        # self.pf_params.alpha_resample_ratio = 1.
-        # self.pf_params.batch_size = 1
-        # self.pf_params.gpu_num = 0
-        #
-        # # build initial covariance matrix of particles, in pixels and radians
-        # particle_std = self.pf_params.init_particles_std.copy()
-        # # particle_std[0] = particle_std[0] / params.map_pixel_in_meters  # convert meters to pixels
-        # particle_std2 = np.square(particle_std)  # variance
-        # self.pf_params.init_particles_cov = np.diag(particle_std2[(0, 0, 1),])
-        #
-        # self.pf_params.stateful = False
-        # self.pf_params.return_state = True
-        # self.pf_params.global_map_size = (1000, 1000, 1)
-        # self.pf_params.window_scaler = 8.0
-        #
-        # self.pfnet_model = pfnet.pfnet_model(self.pf_params)
-        # print("=====> PFNet initialized")
+        # create pf model
+        argparser = argparse.ArgumentParser()
+        self.pf_params = argparser.parse_args([])
+        self.pf_params.map_pixel_in_meters = 0.1
+        self.pf_params.init_particles_distr = 'uniform'
+        self.pf_params.init_particles_std = np.array([15, 0.523599], dtype=np.float32)
+        self.pf_params.trajlen = 1
+        self.pf_params.num_particles = 100
+        self.pf_params.transition_std = np.array([0., 0.], dtype=np.float32)
+        self.pf_params.resample = True
+        self.pf_params.alpha_resample_ratio = 1.
+        self.pf_params.batch_size = 1
+        self.pf_params.gpu_num = 0
+
+        # build initial covariance matrix of particles, in pixels and radians
+        particle_std = self.pf_params.init_particles_std.copy()
+        # particle_std[0] = particle_std[0] / params.map_pixel_in_meters  # convert meters to pixels
+        particle_std2 = np.square(particle_std)  # variance
+        self.pf_params.init_particles_cov = np.diag(particle_std2[(0, 0, 1),])
+
+        self.pf_params.stateful = False
+        self.pf_params.return_state = True
+        self.pf_params.global_map_size = (1000, 1000, 1)
+        self.pf_params.window_scaler = 8.0
+
+        self.pfnet_model = pfnet.pfnet_model(self.pf_params)
+        print("=====> PFNet initialized")
 
     def step(self, action):
         state, reward, done, info = super(NavigateGibsonEnv, self).step(action)
 
         custom_state = OrderedDict()
-        custom_state['task_obs'] = np.concatenate([
-                        self.task.get_task_obs(self)[:-2], # goal x,y relative distance
-                        self.robots[0].calc_state(),    # proprioceptive state
-                    ], 0)
-        # custom_state['rgb'] = state['rgb']  # [0, 1] range rgb image
+        # custom_state['task_obs'] = np.concatenate([
+        #                 self.task.get_task_obs(self)[:-2], # goal x,y relative distance
+        #                 self.robots[0].calc_state(),    # proprioceptive state
+        #             ], 0)
+
+        # process new env observation
+        rgb = datautils.process_raw_image(state['rgb']) # [-1, +1] range rgb image
+        custom_state['rgb'] = rgb
 
         return custom_state, reward, done, info
 
@@ -104,10 +108,13 @@ class NavigateGibsonEnv(iGibsonEnv):
         state = super(NavigateGibsonEnv, self).reset()
 
         custom_state = OrderedDict()
-        custom_state['task_obs'] = np.concatenate([
-                        self.task.get_task_obs(self)[:-2], # goal x,y relative distance
-                        self.robots[0].calc_state(),    # proprioceptive state
-                    ], 0)
-        # custom_state['rgb'] = state['rgb']  # [0, 1] range rgb image
+        # custom_state['task_obs'] = np.concatenate([
+        #                 self.task.get_task_obs(self)[:-2], # goal x,y relative distance
+        #                 self.robots[0].calc_state(),    # proprioceptive state
+        #             ], 0)
+
+        # process new env observation
+        rgb = datautils.process_raw_image(state['rgb']) # [-1, +1] range rgb image
+        custom_state['rgb'] = rgb
 
         return custom_state

@@ -232,16 +232,16 @@ def train_eval(
         tf_py_env = [lambda model_id=model_ids[i]: env_load_fn(model_id, 'headless', gpu)
                      for i in range(num_parallel_environments)]
         tf_env = tf_py_environment.TFPyEnvironment(
-            # tf_py_env[0])
-            parallel_py_environment.ParallelPyEnvironment(tf_py_env))
+            tf_py_env[0])
+            # parallel_py_environment.ParallelPyEnvironment(tf_py_env))
 
         if eval_env_mode == 'gui':
             assert num_parallel_environments_eval == 1, 'only one GUI env is allowed'
         eval_py_env = [lambda model_id=model_ids_eval[i]: env_load_fn(model_id, eval_env_mode, gpu)
                        for i in range(num_parallel_environments_eval)]
         eval_tf_env = tf_py_environment.TFPyEnvironment(
-            # eval_py_env[0])
-            parallel_py_environment.ParallelPyEnvironment(eval_py_env))
+            eval_py_env[0])
+            # parallel_py_environment.ParallelPyEnvironment(eval_py_env))
 
         time_step_spec = tf_env.time_step_spec()
         observation_spec = time_step_spec.observation
