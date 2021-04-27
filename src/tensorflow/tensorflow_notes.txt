@@ -227,6 +227,6 @@ April 21th 2021
     2. reward mse gt pose and mean est pose (from particles) or -ve log likelihood
     3. fixed episode steps budget say 500
     4. (optional) stopping condition based on gaussian covariance /entropy threshold
-----
+-----
 4. if above works, random starting position
 5. particle encoding + complementary floor map
